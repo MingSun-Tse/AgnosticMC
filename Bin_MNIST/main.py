@@ -43,21 +43,24 @@ if __name__ == "__main__":
   parser.add_argument('--gpu', type=int, help="which gpu to run on. default is 0", default=0)
   parser.add_argument('-b', '--batch_size', type=int, help='batch size', default=64)
   parser.add_argument('--test_batch_size', type=int, help='batch size', default=5)
-  parser.add_argument('--lr', type=float, help='learning rate', default=1e-3)
-  parser.add_argument('--floss_weight', type=float, help='loss weight to balance multi-losses', default=1.0)
-  parser.add_argument('--ploss_weight', type=float, help='loss weight to balance multi-losses', default=1.0)
-  parser.add_argument('--closs_weight', type=float, help='loss weight to balance multi-losses', default=1.0)
+  parser.add_argument('--lr', type=float, help='learning rate', default=1e-5)
+  parser.add_argument('--floss_weight',   type=float, help='loss weight to balance multi-losses', default=1.0)
+  parser.add_argument('--ploss_weight',   type=float, help='loss weight to balance multi-losses', default=2.0)
+  parser.add_argument('--closs_weight',   type=float, help='loss weight to balance multi-losses', default=10)
+  parser.add_argument('--tvloss_weight',  type=float, help='loss weight to balance multi-losses', default=1e-5)
+  parser.add_argument('--clsloss_weight', type=float, help='loss weight to balance multi-losses', default=10)
   parser.add_argument('--floss_lw', type=str, default="1-1-1-1-1-1-1")
   parser.add_argument('--ploss_lw', type=str, default="1-1-1-1-1-1-1")
-  parser.add_argument('--closs_lw', type=str, default="10-10")
+  parser.add_argument('--closs_lw', type=str, default="1-1")
   parser.add_argument('-p', '--project_name', type=str, help='the name of project, to save logs etc., will be set in directory, "Experiments"')
   parser.add_argument('-r', '--resume', action='store_true', help='if resume, default=False')
   parser.add_argument('-m', '--mode', type=str, help='the training mode name.')
-  parser.add_argument('--epoch', type=int, default=61)
+  parser.add_argument('--epoch', type=int, default=51)
   parser.add_argument('--num_step_per_epoch', type=int, default=10000)
   parser.add_argument('--debug', action="store_true")
   parser.add_argument('--num_class', type=int, default=10)
   parser.add_argument('--num_test_sample', type=int, default=5)
+  parser.add_argument('--use_pseudo_code', action="store_true")
   args = parser.parse_args()
   
   # Get path
@@ -69,7 +72,7 @@ if __name__ == "__main__":
   assert(args.mode in AutoEncoders.keys())
   
   # Set up directories and logs etc
-  if args.debug:
+  if args.debug and args.project_name == None:
     args.project_name = "test"
   project_path = pjoin("../Experiments", args.project_name)
   rec_img_path = pjoin(project_path, "reconstructed_images")
@@ -113,15 +116,15 @@ if __name__ == "__main__":
                                 transforms.Normalize((0.1307,), (0.3081,))])
                              )
   kwargs = {'num_workers': 4, 'pin_memory': True}
-  train_loader = torch.utils.data.DataLoader(data_train, batch_size=args.batch_size,      shuffle=True,  **kwargs)
-  test_loader  = torch.utils.data.DataLoader(data_test,  batch_size=args.test_batch_size, shuffle=False, **kwargs)
+  train_loader = torch.utils.data.DataLoader(data_train, batch_size=args.batch_size,      shuffle=True, **kwargs)
+  test_loader  = torch.utils.data.DataLoader(data_test,  batch_size=args.test_batch_size, shuffle=True, **kwargs)
   
   
   # Prepare test code
-  # one_hot = OneHotCategorical(torch.Tensor([1./args.num_class] * args.num_class))
+  one_hot = OneHotCategorical(torch.Tensor([1./args.num_class] * args.num_class))
   # test_codes = one_hot.sample_n(args.num_test_sample) * 100 # logits
-  _, (test_img, _) = list(enumerate(test_loader))[0]
-  test_codes = ae.enc(test_img.cuda())
+  _, (test_imgs, test_labels) = list(enumerate(test_loader))[0]
+  test_codes = ae.enc(test_imgs.cuda())
   np.save(pjoin(rec_img_path, "test_codes.npy"), test_codes.data.cpu().numpy())
   
   # print setting for later check
@@ -151,28 +154,38 @@ if __name__ == "__main__":
             # {'params': ae.dec.conv3.parameters(), 'lr': args.lr * 5},
             # ], lr=args.lr)  
   
-  
-
-  
   optimizer = torch.optim.Adam(ae.parameters(), lr=args.lr)
   loss_func = nn.MSELoss()
   t1 = time.time()
+  begin = 50.0; end = 50.0
   for epoch in range(args.epoch):
     for step, (img, label) in enumerate(train_loader):
       # Generate codes randomly
-      # x = torch.randn([args.batch_size, args.num_class]) + one_hot.sample_n(args.batch_size) * 3 # logits
-      x = ae.enc(img.cuda())
-      x = x.cuda()
+      total_step = epoch * len(data_train) + step
+      if args.use_pseudo_code:
+        onehot_label = one_hot.sample_n(args.batch_size)
+        x = torch.randn([args.batch_size, args.num_class]) * 5 + onehot_label * (begin - (begin-end)/args.epoch * epoch)# logits
+        x = x.cuda()
+        label = onehot_label.data.numpy().argmax(axis=1)
+        label = torch.from_numpy(label).long()
+      else:
+        x = ae.enc(img.cuda())
       prob_gt = nn.functional.softmax(x, dim=1) # prob, ground truth
+      label = label.cuda()
       
       # forward
       if args.mode == "BD":
-        feats1, feats2 = ae(x)
-      elif args.mode == "SE":
-        feats1, small_feats1, feats2 = ae(x) # feats1: feats from encoder. small_feats1: feats from small encoder. feats2: feats from encoder.
-      
-      # code loss: cross entropy
-      if args.mode == "BD":
+        img_rec1, feats1, img_rec2, feats2 = ae(x)
+        # total variation loss
+        tvloss1 = args.tvloss_weight * (
+                torch.sum(torch.abs(img_rec1[:, :, :, :-1] - img_rec1[:, :, :, 1:])) + 
+                torch.sum(torch.abs(img_rec1[:, :, :-1, :] - img_rec1[:, :, 1:, :]))
+        )
+        tvloss2 = args.tvloss_weight * (
+                torch.sum(torch.abs(img_rec2[:, :, :, :-1] - img_rec2[:, :, :, 1:])) + 
+                torch.sum(torch.abs(img_rec2[:, :, :-1, :] - img_rec2[:, :, 1:, :]))
+        )
+        # code loss: KL Divergence
         logits1 = feats1[-1]; logprob_1 = nn.functional.log_softmax(logits1, dim=1) 
         logits2 = feats2[-1]; logprob_2 = nn.functional.log_softmax(logits2, dim=1)
         closs1 = nn.KLDivLoss()(logprob_1, prob_gt.data) * args.closs_weight * closs_lw[0]
@@ -182,10 +195,18 @@ if __name__ == "__main__":
         ploss2 = loss_func(feats2[1], feats1[1].data) * args.ploss_weight * ploss_lw[1]
         ploss3 = loss_func(feats2[2], feats1[2].data) * args.ploss_weight * ploss_lw[2]
         ploss4 = loss_func(feats2[3], feats1[3].data) * args.ploss_weight * ploss_lw[3]
+        # hard classification loss
+        cls_loss1 = nn.CrossEntropyLoss()(logits1, label.data) * args.clsloss_weight
+        cls_loss2 = nn.CrossEntropyLoss()(logits2, label.data) * args.clsloss_weight
         # total loss
-        loss = closs1 + closs2 + ploss1 + ploss2 + ploss3 + ploss4
-      
+        loss = closs1 + closs2 + ploss1 + ploss2 + ploss3 + ploss4 + tvloss1 + tvloss2 + cls_loss1 + cls_loss2
+        # train cls accuracy
+        pred1 = logits1.detach().max(1)[1]; train_acc1 = pred1.eq(label.view_as(pred1)).sum().cpu().data.numpy() / float(args.batch_size)
+        pred2 = logits2.detach().max(1)[1]; train_acc2 = pred2.eq(label.view_as(pred2)).sum().cpu().data.numpy() / float(args.batch_size)
+        
       elif args.mode == "SE":
+        feats1, small_feats1, feats2 = ae(x) # feats1: feats from encoder. small_feats1: feats from small encoder. feats2: feats from encoder.
+        # code loss: KL Divergence
         logits1 = small_feats1[-1]; logprob_1 = nn.functional.log_softmax(logits1, dim=1)
         logits2 =       feats2[-1]; logprob_2 = nn.functional.log_softmax(logits2, dim=1)
         closs1 = nn.KLDivLoss()(logprob_1, prob_gt.data) * args.closs_weight * closs_lw[0]
@@ -225,8 +246,10 @@ if __name__ == "__main__":
       # Print training loss
       if step % SHOW_INTERVAL == 0:
         if args.mode == "BD":
-          format_str = "E{}S{} loss={:.3f} | closs: {:.5f} {:.5f} | ploss: {:.5f} {:.5f} {:.5f} {:.5f} ({:.3f}s/step)"
+          format_str = "E{}S{} loss={:.3f} | closs: {:.5f} {:.5f} | tvloss: {:.5f} {:.5f} | cls_loss: {:.5f}({:.4f}) {:.5f}({:.4f}) | ploss: {:.5f} {:.5f} {:.5f} {:.5f} ({:.3f}s/step)"
           logprint(format_str.format(epoch, step, loss.data.cpu().numpy(), closs1.data.cpu().numpy(), closs2.data.cpu().numpy(),
+              tvloss1.data.cpu().numpy(), tvloss2.data.cpu().numpy(),
+              cls_loss1.data.cpu().numpy(), train_acc1, cls_loss2.data.cpu().numpy(), train_acc2,
               ploss1.data.cpu().numpy(), ploss2.data.cpu().numpy(), ploss3.data.cpu().numpy(), ploss4.data.cpu().numpy(),
               (time.time()-t1)/SHOW_INTERVAL), log)
         
@@ -245,10 +268,33 @@ if __name__ == "__main__":
           x = test_codes[i].cuda()
           img1 = ae.dec(x)
           img2 = ae.dec(ae.enc(img1))
-          out_img1_path = pjoin(rec_img_path, "%s_E%sS%s_img%s-rec1.jpg" % (TIME_ID, epoch, step, i))
-          out_img2_path = pjoin(rec_img_path, "%s_E%sS%s_img%s-rec2.jpg" % (TIME_ID, epoch, step, i))
+          out_img1_path = pjoin(rec_img_path, "%s_E%sS%s_img%s-rec1_label=%s.jpg" % (TIME_ID, epoch, step, i, test_labels[i].data.numpy()))
+          out_img2_path = pjoin(rec_img_path, "%s_E%sS%s_img%s-rec2_label=%s.jpg" % (TIME_ID, epoch, step, i, test_labels[i].data.numpy()))
           vutils.save_image(img1.data.cpu().float(), out_img1_path) # save some samples to check
           vutils.save_image(img2.data.cpu().float(), out_img2_path) # save some samples to check
+        
+        # test with the real codes
+        test_loader = torch.utils.data.DataLoader(data_test,  batch_size=64, shuffle=True, **kwargs)
+        closs1_test = closs2_test = test_acc1 = test_acc2 = cnt = 0
+        for i, (img, label) in enumerate(test_loader):
+          x = ae.enc(img.cuda())
+          label = label.cuda()
+          prob_gt = nn.functional.softmax(x, dim=1)
+          img_rec1, feats1, img_rec2, feats2 = ae(x)
+          logits1 = feats1[-1]; logprob_1 = nn.functional.log_softmax(logits1, dim=1)
+          logits2 = feats2[-1]; logprob_2 = nn.functional.log_softmax(logits2, dim=1)
+          closs1_ = nn.KLDivLoss()(logprob_1, prob_gt.data) * args.closs_weight * closs_lw[0]
+          closs2_ = nn.KLDivLoss()(logprob_2, prob_gt.data) * args.closs_weight * closs_lw[1]
+          closs1_test += closs1_.data.cpu().numpy()
+          closs2_test += closs2_.data.cpu().numpy()
+          # test cls accuracy
+          pred1 = logits1.detach().max(1)[1]; test_acc1 += pred1.eq(label.view_as(pred1)).sum().cpu().data.numpy()
+          pred2 = logits2.detach().max(1)[1]; test_acc2 += pred2.eq(label.view_as(pred2)).sum().cpu().data.numpy()
+          cnt += 1
+        closs1_test /= cnt; test_acc1 /= float(len(data_test))
+        closs2_test /= cnt; test_acc2 /= float(len(data_test))
+        format_str = "E{}S{} test closs: {:.5f}({:.4f}) {:.5f}({:.4f})"
+        logprint(format_str.format(epoch, step, closs1_test, test_acc1, closs2_test, test_acc2), log)
         
         # save model
         if args.mode == "BD":

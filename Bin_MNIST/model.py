@@ -134,9 +134,11 @@ class AutoEncoder_BD(nn.Module):
     self.dec = Decoder(d, fixed=False)
   
   def forward(self, code):
-    feats1 = self.enc.forward_branch(self.dec(code))
-    feats2 = self.enc.forward_branch(self.dec(feats1[-1]))
-    return feats1, feats2
+    img_rec1 = self.dec(code)
+    feats1   = self.enc.forward_branch(img_rec1)
+    img_rec2 = self.dec(feats1[-1])
+    feats2   = self.enc.forward_branch(img_rec2)
+    return img_rec1, feats1, img_rec2, feats2
     
 class AutoEncoder_SE(nn.Module):
   def __init__(self, e1=None, d=None, e2=None):
@@ -146,9 +148,9 @@ class AutoEncoder_SE(nn.Module):
     self.small_enc = SmallEncoder(e2, fixed=False)
   
   def forward(self, code):
-    img1 = self.dec(code)
-    feats1 = self.enc.forward_branch(img1)
-    small_feats1 = self.small_enc.forward_branch(img1)
+    img_rec1 = self.dec(code)
+    feats1 = self.enc.forward_branch(img_rec1)
+    small_feats1 = self.small_enc.forward_branch(img_rec1)
     feats2 = self.enc.forward_branch(self.dec(small_feats1[-1]))
     return feats1, small_feats1, feats2
     
