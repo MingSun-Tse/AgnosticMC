@@ -23,12 +23,12 @@ import torchvision.transforms as transforms
 from torch.distributions.one_hot_categorical import OneHotCategorical
 import torchvision.datasets as datasets
 # my libs
-from model import AutoEncoders
+from model import AutoEncoders, EMA
 
 
 def logprint(some_str, f=sys.stdout):
   print(time.strftime("[%s" % os.getpid() + "-%Y/%m/%d-%H:%M] ") + str(some_str), file=f, flush=True)
-  
+
   
 if __name__ == "__main__":
   # Some settings
@@ -41,7 +41,7 @@ if __name__ == "__main__":
   parser.add_argument('--e2',  type=str, default=None)
   parser.add_argument('--d',   type=str, default="../Ex*/*81/w*/*BD*E76S0*.pth")
   parser.add_argument('--gpu', type=int, default=0)
-  parser.add_argument('-b', '--batch_size', type=int, default=100)
+  parser.add_argument('-b', '--batch_size', type=int, default=64)
   parser.add_argument('--test_batch_size',  type=int, default=5)
   parser.add_argument('--lr', type=float, default=5e-4)
   parser.add_argument('--floss_weight',   type=float, help='loss weight to balance multi-losses', default=1.0)
@@ -61,6 +61,8 @@ if __name__ == "__main__":
   parser.add_argument('--num_class', type=int, default=10)
   parser.add_argument('--num_test_sample', type=int, default=5)
   parser.add_argument('--use_pseudo_code', action="store_false")
+  parser.add_argument('--begin', type=float, default=40)
+  parser.add_argument('--end',   type=float, default=25)
   args = parser.parse_args()
   
   # Get path
@@ -96,6 +98,12 @@ if __name__ == "__main__":
   ae = AE(args.e1, args.d, args.e2)
   ae.cuda()
   
+  # Set up exponential moving average
+  ema = EMA(0.9)
+  for name, param in ae.named_parameters():
+    if param.requires_grad:
+      ema.register(name, param.data)
+
   # Prepare data
   data_train = datasets.MNIST('./MNIST_data',
                               train=True,
@@ -119,7 +127,6 @@ if __name__ == "__main__":
   
   
   # Prepare transform and one hot generator
-  randomaffine = transforms.RandomAffine(degrees=10, translate=(0.1, 0.1), scale=(0.8, 1.2))
   one_hot = OneHotCategorical(torch.Tensor([1./args.num_class] * args.num_class))
   
   # Prepare test code
@@ -151,14 +158,13 @@ if __name__ == "__main__":
           previous_epoch = int(num1)
           previous_step  = int(num2)
   
-  begin = 20.0; end = 15.0
   for epoch in range(previous_epoch, args.num_epoch):
     for step, (img, label) in enumerate(train_loader):
       ae.train()
       # Generate codes randomly
       if args.use_pseudo_code:
         onehot_label = one_hot.sample_n(args.batch_size)
-        x = torch.randn([args.batch_size, args.num_class]) * 5.0 + onehot_label * (begin - (begin-end)/args.num_epoch * epoch) # logits
+        x = torch.randn([args.batch_size, args.num_class]) * 5.0 + onehot_label * (args.begin - (args.begin-args.end)/args.num_epoch * epoch) # logits
         x = x.cuda()
         label = onehot_label.data.numpy().argmax(axis=1)
         label = torch.from_numpy(label).long()
@@ -199,7 +205,7 @@ if __name__ == "__main__":
         pred2 = logits2.detach().max(1)[1]; train_acc2 = pred2.eq(label.view_as(pred2)).sum().cpu().data.numpy() / float(args.batch_size)
         
       elif args.mode == "SE":
-        img_rec1, feats1, s_feats1, img_rec2, feats2 = ae(x)
+        img_rec1, feats1, Sfeats1, img_rec2, feats2 = ae(x)
         # total variation loss
         tvloss1 = args.tvloss_weight * (
                 torch.sum(torch.abs(img_rec1[:, :, :, :-1] - img_rec1[:, :, :, 1:])) + 
@@ -210,13 +216,13 @@ if __name__ == "__main__":
                 torch.sum(torch.abs(img_rec2[:, :, :-1, :] - img_rec2[:, :, 1:, :]))
         )
         # code loss: KL Divergence
-        logits1 = s_feats1[-1]; logprob1 = nn.functional.log_softmax(logits1, dim=1)
+        logits1 = Sfeats1[-1]; logprob1 = nn.functional.log_softmax(logits1, dim=1)
         logits2 =       feats2[-1]; logprob2 = nn.functional.log_softmax(logits2, dim=1)
         closs1 = nn.KLDivLoss()(logprob1, prob_gt.data) * args.closs_weight * closs_lw[0]
         closs2 = nn.KLDivLoss()(logprob2, prob_gt.data) * args.closs_weight * closs_lw[1]
         # feature reconstruction loss
-        floss3 = loss_func(s_feats1[2], feats1[2].data) * args.floss_weight * floss_lw[2]
-        floss4 = loss_func(s_feats1[3], feats1[3].data) * args.floss_weight * floss_lw[3]
+        floss3 = loss_func(Sfeats1[2], feats1[2].data) * args.floss_weight * floss_lw[2]
+        floss4 = loss_func(Sfeats1[3], feats1[3].data) * args.floss_weight * floss_lw[3]
         # perceptual loss
         ploss1 = loss_func(feats2[0], feats1[0].data) * args.ploss_weight * ploss_lw[0]
         ploss2 = loss_func(feats2[1], feats1[1].data) * args.ploss_weight * ploss_lw[1]
@@ -233,7 +239,7 @@ if __name__ == "__main__":
       
       elif args.mode == "BDSE":
         # forward
-        img_rec1, feats1, logits1_trans, s_feats1, s_logits1_trans, img_rec2, feats2 = ae(x)
+        img_rec1, feats1, logits1_trans, Sfeats1, Slogits1_trans, img_rec2, feats2 = ae(x)
         
         # total variation loss
         tvloss1 = args.tvloss_weight * (
@@ -250,16 +256,16 @@ if __name__ == "__main__":
         img_norm2 = torch.pow(torch.norm(img_rec2, p=6), 6) * 1e-4
         
         # code reconstruction loss (KL Divergence): train both
-        logits1   = feats1[-1];   logprob1   = nn.functional.log_softmax(logits1, dim=1)
-        logits2   = feats2[-1];   logprob2   = nn.functional.log_softmax(logits2, dim=1)
-        s_logits1 = s_feats1[-1]; s_logprob1 = nn.functional.log_softmax(s_logits1, dim=1)
-        closs1   = nn.KLDivLoss()(logprob1,   prob_gt.data) * args.closs_weight * closs_lw[0]
-        closs2   = nn.KLDivLoss()(logprob2,   prob_gt.data) * args.closs_weight * closs_lw[1]
-        s_closs1 = nn.KLDivLoss()(s_logprob1, prob_gt.data) * args.closs_weight * closs_lw[0]
+        logits1  = feats1[-1];   logprob1 = nn.functional.log_softmax( logits1, dim=1)
+        logits2  = feats2[-1];   logprob2 = nn.functional.log_softmax( logits2, dim=1)
+        Slogits1 = Sfeats1[-1]; Slogprob1 = nn.functional.log_softmax(Slogits1, dim=1)
+        closs1  = nn.KLDivLoss()( logprob1, prob_gt.data) * args.closs_weight * closs_lw[0]
+        closs2  = nn.KLDivLoss()( logprob2, prob_gt.data) * args.closs_weight * closs_lw[1]
+        Scloss1 = nn.KLDivLoss()(Slogprob1, prob_gt.data) * args.closs_weight * closs_lw[0]
         
         # feature reconstruction loss: train the small encoder
-        floss3 = loss_func(s_feats1[2], feats1[2].data) * args.floss_weight * floss_lw[2]
-        floss4 = loss_func(s_feats1[3], feats1[3].data) * args.floss_weight * floss_lw[3]
+        floss3 = loss_func(Sfeats1[2], feats1[2].data) * args.floss_weight * floss_lw[2]
+        floss4 = loss_func(Sfeats1[3], feats1[3].data) * args.floss_weight * floss_lw[3]
         
         # perceptual loss: train the big decoder
         ploss1 = loss_func(feats2[0], feats1[0].data) * args.ploss_weight * ploss_lw[0]
@@ -268,23 +274,23 @@ if __name__ == "__main__":
         ploss4 = loss_func(feats2[3], feats1[3].data) * args.ploss_weight * ploss_lw[3]
         
         # hard classification loss: train both 
-        cls_loss1   = nn.CrossEntropyLoss()(logits1,   label.data) * args.clsloss_weight
-        cls_loss2   = nn.CrossEntropyLoss()(logits2,   label.data) * args.clsloss_weight
-        s_cls_loss1 = nn.CrossEntropyLoss()(s_logits1, label.data) * args.clsloss_weight
+        cls_loss1   = nn.CrossEntropyLoss()( logits1, label.data) * args.clsloss_weight
+        cls_loss2   = nn.CrossEntropyLoss()( logits2, label.data) * args.clsloss_weight
+        Scls_loss1  = nn.CrossEntropyLoss()(Slogits1, label.data) * args.clsloss_weight
         
-        # invariance loss
-        cls_loss1_affine   = nn.CrossEntropyLoss()(  logits1_trans, label.data) * args.clsloss_weight * 10
-        s_cls_loss1_affine = nn.CrossEntropyLoss()(s_logits1_trans, label.data) * args.clsloss_weight * 10
+        # semantic consistency loss
+        cls_loss1_DA  = nn.CrossEntropyLoss()( logits1_trans, label.data) * args.clsloss_weight * 10
+        Scls_loss1_DA = nn.CrossEntropyLoss()(Slogits1_trans, label.data) * args.clsloss_weight * 10
         
         # total loss
-        loss = closs1 + closs2 + s_closs1 + \
+        loss = closs1 + closs2 + Scloss1 + \
                ploss1 + ploss2 + ploss3 + ploss4 + \
                tvloss1 + tvloss2 + \
                floss3 + floss4 + \
-               cls_loss1 + cls_loss2 + s_cls_loss1 + \
-               closs1 / s_closs1.data * 20 + \
+               cls_loss1 + cls_loss2 + Scls_loss1 + \
+               closs1 / Scloss1.data * 20 + \
                img_norm1 + img_norm2 + \
-               cls_loss1_affine + s_cls_loss1_affine
+               cls_loss1_DA + Scls_loss1_DA
         
         # train cls accuracy
         pred1 = logits1.detach().max(1)[1]; train_acc1 = pred1.eq(label.view_as(pred1)).sum().cpu().data.numpy() / float(args.batch_size)
@@ -307,15 +313,19 @@ if __name__ == "__main__":
         logprint("\n=> E{}S{} grad x lr:\n{}".format(epoch, step, ave_grad), log)
       
       optimizer.step()
+      # apply EMA, after updating params
+      for name, param in ae.named_parameters():
+        if param.requires_grad:
+          param.data = ema(name, param.data)
       
       # Print training loss
       if step % SHOW_INTERVAL == 0:
         if args.mode in ["BD", "BDSE"]:
-          format_str = "E{}S{} loss={:.3f} | closs: {:.5f} {:.5f} | tvloss: {:.5f} {:.5f} | img_norm: {:.5f} {:.5f} | cls_loss: {:.5f}({:.4f}) {:.5f}({:.4f}) | ploss: {:.5f} {:.5f} {:.5f} {:.5f} ({:.3f}s/step)"
+          format_str = "E{}S{} loss={:.3f} | closs: {:.5f} {:.5f} | tvloss: {:.5f} {:.5f} | img_norm: {:.5f} {:.5f} | cls_loss: {:.5f}({:.4f}) {:.5f}({:.4f}) {:.5f} | ploss: {:.5f} {:.5f} {:.5f} {:.5f} ({:.3f}s/step)"
           logprint(format_str.format(epoch, step, loss.data.cpu().numpy(), closs1.data.cpu().numpy(), closs2.data.cpu().numpy(),
               tvloss1.data.cpu().numpy(), tvloss2.data.cpu().numpy(),
               img_norm1.data.cpu().numpy(), img_norm2.data.cpu().numpy(),
-              cls_loss1.data.cpu().numpy(), train_acc1, cls_loss1_affine.data.cpu().numpy(), train_acc2,
+              cls_loss1.data.cpu().numpy(), train_acc1, cls_loss1_DA.data.cpu().numpy(), train_acc2, Scls_loss1_DA.data.cpu().numpy(),
               ploss1.data.cpu().numpy(), ploss2.data.cpu().numpy(), ploss3.data.cpu().numpy(), ploss4.data.cpu().numpy(),
               (time.time()-t1)/SHOW_INTERVAL), log)
         
@@ -381,45 +391,45 @@ if __name__ == "__main__":
           torch.save(ae.small_enc.state_dict(), pjoin(weights_path, "%s_SE_E%sS%s_testacc=%.4f.pth" % (TIME_ID, epoch, step, test_acc)))
           
         elif args.mode == "BDSE":
-          closs1_test = closs2_test = s_closs1_test = test_acc1 = test_acc2 = s_test_acc1 = test_acc = cnt = 0
+          closs1_test = closs2_test = Scloss1_test = test_acc1 = test_acc2 = Stest_acc1 = test_acc = cnt = 0
           for i, (img, label) in enumerate(test_loader):
             x = ae.enc(img.cuda())
             label = label.cuda()
             prob_gt = nn.functional.softmax(x, dim=1)
             
             # forward
-            img_rec1, feats1, logits1_trans, s_feats1, s_logits1_trans, img_rec2, feats2 = ae(x)
+            img_rec1, feats1, logits1_trans, Sfeats1, Slogits1_trans, img_rec2, feats2 = ae(x)
             
-            logits1   = feats1[-1];   logprob1   = nn.functional.log_softmax(logits1, dim=1)
-            logits2   = feats2[-1];   logprob2   = nn.functional.log_softmax(logits2, dim=1)
-            s_logits1 = s_feats1[-1]; s_logprob1 = nn.functional.log_softmax(s_logits1, dim=1)
+            logits1  =  feats1[-1];  logprob1 = nn.functional.log_softmax( logits1, dim=1)
+            logits2  =  feats2[-1];  logprob2 = nn.functional.log_softmax( logits2, dim=1)
+            Slogits1 = Sfeats1[-1]; Slogprob1 = nn.functional.log_softmax(Slogits1, dim=1)
             
             # code reconstruction loss
-            closs1_   = nn.KLDivLoss()(logprob1,   prob_gt.data) * args.closs_weight * closs_lw[0]
-            closs2_   = nn.KLDivLoss()(logprob2,   prob_gt.data) * args.closs_weight * closs_lw[1]
-            s_closs1_ = nn.KLDivLoss()(s_logprob1, prob_gt.data) * args.closs_weight * closs_lw[0]
+            closs1_  = nn.KLDivLoss()(logprob1,  prob_gt.data) * args.closs_weight * closs_lw[0]
+            closs2_  = nn.KLDivLoss()(logprob2,  prob_gt.data) * args.closs_weight * closs_lw[1]
+            Scloss1_ = nn.KLDivLoss()(Slogprob1, prob_gt.data) * args.closs_weight * closs_lw[0]
             
-            closs1_test   += closs1_.data.cpu().numpy()
-            closs2_test   += closs2_.data.cpu().numpy()
-            s_closs1_test += s_closs1_.data.cpu().numpy()
+            closs1_test  +=  closs1_.data.cpu().numpy()
+            closs2_test  +=  closs2_.data.cpu().numpy()
+            Scloss1_test += Scloss1_.data.cpu().numpy()
             
             # test cls accuracy
-            pred1 = logits1.detach().max(1)[1]; test_acc1 += pred1.eq(label.view_as(pred1)).sum().cpu().data.numpy()
-            pred2 = logits2.detach().max(1)[1]; test_acc2 += pred2.eq(label.view_as(pred2)).sum().cpu().data.numpy()
-            s_pred1 = s_logits1.detach().max(1)[1]; s_test_acc1 += s_pred1.eq(label.view_as(s_pred1)).sum().cpu().data.numpy()
+            pred1  =  logits1.detach().max(1)[1];  test_acc1 +=  pred1.eq(label.view_as( pred1)).sum().cpu().data.numpy()
+            pred2  =  logits2.detach().max(1)[1];  test_acc2 +=  pred2.eq(label.view_as( pred2)).sum().cpu().data.numpy()
+            Spred1 = Slogits1.detach().max(1)[1]; Stest_acc1 += Spred1.eq(label.view_as(Spred1)).sum().cpu().data.numpy()
             cnt += 1
-            
+             
             # test acc for small enc
             pred = ae.small_enc(img.cuda()).detach().max(1)[1]
             test_acc += pred.eq(label.view_as(pred)).sum().cpu().data.numpy()
           
-          closs1_test /= cnt; test_acc1 /= float(len(data_test))
-          closs2_test /= cnt; test_acc2 /= float(len(data_test))
-          s_closs1_test /= cnt; s_test_acc1 /= float(len(data_test))
+          closs1_test  /= cnt;  test_acc1 /= float(len(data_test))
+          closs2_test  /= cnt;  test_acc2 /= float(len(data_test))
+          Scloss1_test /= cnt; Stest_acc1 /= float(len(data_test))
           test_acc /= float(len(data_test))
           
           format_str = "E{}S{} test closs: {:.5f}({:.4f}) {:.5f}({:.4f}) {:.5f}({:.4f}) | test accuracy: {:.4f}"
-          logprint(format_str.format(epoch, step, closs1_test, test_acc1, closs2_test, test_acc2, s_closs1_test, s_test_acc1, test_acc), log)
+          logprint(format_str.format(epoch, step, closs1_test, test_acc1, closs2_test, test_acc2, Scloss1_test, Stest_acc1, test_acc), log)
           torch.save(ae.dec.state_dict(), pjoin(weights_path, "%s_BD_E%sS%s_testacc1=%.4f.pth" % (TIME_ID, epoch, step, test_acc1)))
           torch.save(ae.small_enc.state_dict(), pjoin(weights_path, "%s_SE_E%sS%s_testacc=%.4f.pth" % (TIME_ID, epoch, step, test_acc)))
   

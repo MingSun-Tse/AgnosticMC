@@ -5,7 +5,22 @@ import torch.nn as nn
 import torch
 from torch.utils.serialization import load_lua
 from torch.distributions.one_hot_categorical import OneHotCategorical
+import torch.nn.functional as F
+import math
 pjoin = os.path.join
+
+# Exponential Moving Average
+class EMA():
+  def __init__(self, mu):
+    self.mu = mu
+    self.shadow = {}
+  def register(self, name, val):
+    self.shadow[name] = val.clone()
+  def __call__(self, name, x):
+    assert name in self.shadow
+    new_average = (1.0 - self.mu) * x + self.mu * self.shadow[name]
+    self.shadow[name] = new_average.clone()
+    return new_average
 
 # Use the LeNet model as https://github.com/iRapha/replayed_distillation/blob/master/models/lenet.py
 class LeNet5(nn.Module):
@@ -117,7 +132,48 @@ class DLeNet5_drop(nn.Module):
     y = self.pad(y)              # 6x32x32
     y = self.relu(self.conv1(y)) # 1x32x32
     return y
- 
+    
+class SmallLeNet5(nn.Module):
+  def __init__(self, model=None, fixed=False):
+    super(SmallLeNet5, self).__init__()
+    self.fixed = fixed
+    
+    self.conv1 = nn.Conv2d( 1,  3, kernel_size=(5, 5), stride=(1, 1), padding=(0, 0)); self.pool1 = nn.MaxPool2d(kernel_size=2, stride=2, padding=0)
+    self.conv2 = nn.Conv2d( 3,  8, kernel_size=(5, 5), stride=(1, 1), padding=(0, 0)); self.pool2 = nn.MaxPool2d(kernel_size=2, stride=2, padding=0)
+    self.fc3 = nn.Linear(200, 120)
+    self.fc4 = nn.Linear(120,  84)
+    self.fc5 = nn.Linear( 84,  10)
+    self.relu = nn.ReLU(inplace=True)
+    
+    if model:
+      self.load_state_dict(torch.load(model))
+    if fixed:
+      for param in self.parameters():
+          param.requires_grad = False
+      
+  def forward(self, y):
+    y = self.relu(self.conv1(y))
+    y = self.pool1(y)
+    y = self.relu(self.conv2(y))
+    y = self.pool2(y)
+    y = y.view(y.size(0), -1)
+    y = self.relu(self.fc3(y))
+    y = self.relu(self.fc4(y))
+    y = self.fc5(y)
+    return y
+  
+  def forward_branch(self, y):
+    y = self.relu(self.conv1(y)); out1 = y
+    y = self.pool1(y)
+    y = self.relu(self.conv2(y)); out2 = y
+    y = self.pool2(y)
+    y = y.view(y.size(0), -1)
+    y = self.relu(self.fc3(y)); out3 = y
+    y = self.relu(self.fc4(y)); out4 = y
+    y = self.fc5(y)
+    return out1, out2, out3, out4, y
+
+# --------------------------------------------------- 
 class Transform(nn.Module):
   def __init__(self):
     super(Transform, self).__init__()
@@ -226,7 +282,7 @@ class Transform3(nn.Module): # translation
     kernel8 = torch.from_numpy(np.array(kernel8)).float()
     self.conv8 = nn.Conv2d(1, 1, kernel_size=(5, 5), stride=(1, 1), padding=(2, 2))
     self.conv8.weight = nn.Parameter(kernel8)
-    self.one_hot1 = OneHotCategorical(torch.Tensor([1./25] * 25))
+    self.one_hot1 = OneHotCategorical(torch.Tensor([1./8] * 8))
     
     for param in self.parameters():
       param.requires_grad = False
@@ -234,7 +290,9 @@ class Transform3(nn.Module): # translation
   def forward(self, x):
     switch = self.one_hot1.sample().cuda()
     y = self.conv_left(x) * switch[0] + self.conv_right(x) * switch[1] + \
-        self.conv_up(x)   * switch[2] + self.conv_down(x)  * switch[3]
+        self.conv_up(x)   * switch[2] + self.conv_down(x)  * switch[3] + \
+        self.conv5(x)     * switch[4] + self.conv6(x)      * switch[5] + \
+        self.conv7(x)     * switch[6] + self.conv8(x)      * switch[7]
     return y
     
 class Transform4(nn.Module): # rand translation
@@ -274,46 +332,87 @@ class Transform4(nn.Module): # rand translation
     y = y1 * switch[0] + y2 * switch[1] + y3 * switch[2]
     return y
     
-class SmallLeNet5(nn.Module):
-  def __init__(self, model=None, fixed=False):
-    super(SmallLeNet5, self).__init__()
-    self.fixed = fixed
+class Transform5(nn.Module): # combine
+  def __init__(self):
+    super(Transform5, self).__init__()
+    kernel = [[[[-1, -1, -1], [-1, 9, -1], [-1, -1, -1]]]]
+    kernel = torch.from_numpy(np.array(kernel)).float()
+    self.conv1 = nn.Conv2d(1, 1, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1), bias=False)
+    self.conv1.weight = nn.Parameter(kernel)
     
-    self.conv1 = nn.Conv2d( 1,  3, kernel_size=(5, 5), stride=(1, 1), padding=(0, 0)); self.pool1 = nn.MaxPool2d(kernel_size=2, stride=2, padding=0)
-    self.conv2 = nn.Conv2d( 3,  8, kernel_size=(5, 5), stride=(1, 1), padding=(0, 0)); self.pool2 = nn.MaxPool2d(kernel_size=2, stride=2, padding=0)
-    self.fc3 = nn.Linear(200, 120)
-    self.fc4 = nn.Linear(120,  84)
-    self.fc5 = nn.Linear( 84,  10)
+    self.conv_trans1 = nn.Conv2d(1, 1, kernel_size=(5, 5), stride=(1, 1), padding=(2, 2), bias=False)
+    self.conv_trans2 = nn.Conv2d(1, 1, kernel_size=(5, 5), stride=(1, 1), padding=(2, 2), bias=False)
+    self.conv_trans3 = nn.Conv2d(1, 1, kernel_size=(5, 5), stride=(1, 1), padding=(2, 2), bias=False)
+    self.conv_trans4 = nn.Conv2d(1, 1, kernel_size=(5, 5), stride=(1, 1), padding=(2, 2), bias=False)
+    
+    self.conv_smooth = nn.Conv2d(1, 1, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1), bias=False)
+    self.conv_smooth.weight = nn.Parameter(torch.ones(9).cuda().view(1,1,3,3) * 1/9.)
+    self.drop = nn.Dropout(p=0.05)
     self.relu = nn.ReLU(inplace=True)
     
-    if model:
-      self.load_state_dict(torch.load(model))
-    if fixed:
-      for param in self.parameters():
-          param.requires_grad = False
-      
-  def forward(self, y):
-    y = self.relu(self.conv1(y))
-    y = self.pool1(y)
-    y = self.relu(self.conv2(y))
-    y = self.pool2(y)
-    y = y.view(y.size(0), -1)
-    y = self.relu(self.fc3(y))
-    y = self.relu(self.fc4(y))
-    y = self.fc5(y)
-    return y
+    self.one_hot1 = OneHotCategorical(torch.Tensor([0.6, 0.4]))
+    self.one_hot2 = OneHotCategorical(torch.Tensor([1/24., 1/24., 1/24., 1/24., 1/24.,
+                                                    1/24., 1/24., 1/24., 1/24., 1/24.,
+                                                    1/24., 1/24., 0.000, 1/24., 1/24.,
+                                                    1/24., 1/24., 1/24., 1/24., 1/24.,
+                                                    1/24., 1/24., 1/24., 1/24., 1/24.])) 
+    
+    for param in self.parameters():
+      param.requires_grad = False
   
-  def forward_branch(self, y):
-    y = self.relu(self.conv1(y)); out1 = y
-    y = self.pool1(y)
-    y = self.relu(self.conv2(y)); out2 = y
-    y = self.pool2(y)
-    y = y.view(y.size(0), -1)
-    y = self.relu(self.fc3(y)); out3 = y
-    y = self.relu(self.fc4(y)); out4 = y
-    y = self.fc5(y)
-    return out1, out2, out3, out4, y
-
+  def forward(self, x):
+    # random translation 
+    self.conv_trans1.weight = nn.Parameter(self.one_hot2.sample().cuda().view(1,1,5,5))
+    self.conv_trans2.weight = nn.Parameter(self.one_hot2.sample().cuda().view(1,1,5,5))
+    y1 = self.conv_trans2(self.conv_trans1(x)) # equivalent to random crop
+    
+    # smooth
+    # y2 = self.conv_smooth(x)
+    
+    # data dropout
+    y3 = (self.drop(self.conv1(x)) + x) / 2.
+    
+    # gaussian noise
+    # y4 = self.relu(torch.randn_like(x).cuda() * torch.mean(x) * 0.01)
+    
+    switch = self.one_hot1.sample().cuda()
+    y = y1 * switch[0] + y3 * switch[1]
+    
+    for param in self.parameters():
+      param.requires_grad = False
+    return y
+     
+class Transform6(nn.Module): # resize
+  def __init__(self):
+    super(Transform6, self).__init__()
+    self.transform = Transform5()
+    
+  def forward(self, x):
+    rand_scale = np.random.rand() * 0.05 + 1.03125
+    y = F.interpolate(x, scale_factor=rand_scale)
+    new_width = int(rand_scale*32)
+    w = np.random.randint(new_width-32); h = np.random.randint(new_width-32)
+    rand_crop = y[:, :, w:w+32, h:h+32]
+    return rand_crop
+     
+class Transform7(nn.Module): # rotate
+  def __init__(self):
+    super(Transform7, self).__init__()
+    self.transform = Transform5().eval()
+    
+  def forward(self, x):
+    theta = []
+    for _ in range(x.shape[0]):
+      angle = np.random.randint(-3, 3) / 180.0 * math.pi
+      trans = np.arange(-2, 3) / 32.
+      trans1 = trans[np.random.randint(len(trans))]
+      trans2 = trans[np.random.randint(len(trans))]
+      theta.append([[math.cos(angle), -math.sin(angle), trans1],
+                    [math.sin(angle),  math.cos(angle), trans2]])
+    theta = torch.from_numpy(np.array(theta)).float().cuda()
+    grid = F.affine_grid(theta, x.size())
+    x = F.grid_sample(x, grid)
+    return self.transform(x)
 # ---------------------------------------------------
 # AutoEncoder part
 Encoder = LeNet5
@@ -348,7 +447,7 @@ class AutoEncoder_BDSE(nn.Module):
     super(AutoEncoder_BDSE, self).__init__()
     self.enc = Encoder(e1, fixed=True).eval()
     self.dec = Decoder(d,  fixed=False) # decoder is also trainable
-    self.small_enc = SmallEncoder(e2, fixed=False)
+    self.small_enc = SmallEncoder(e2, fixed=False)  
   def forward(self, code):
     img_rec1 = self.dec(code)
     feats1   = self.enc.forward_branch(img_rec1); small_feats1 = self.small_enc.forward_branch(img_rec1)
@@ -362,11 +461,43 @@ class AutoEncoder_BDSE_Trans(nn.Module):
     self.enc = Encoder(e1, fixed=True).eval()
     self.dec = Decoder(d,  fixed=False) # decoder is also trainable
     self.small_enc = SmallEncoder(e2, fixed=False)
-    self.transform = Transform4()
+    self.transform = Transform7()
+  
+    # -----Spatial Transformer Network --------------
+    # Spatial transformer localization-network
+    self.localization = nn.Sequential(
+        nn.Conv2d(1, 8, kernel_size=7),
+        nn.MaxPool2d(2, stride=2),
+        nn.ReLU(True),
+        nn.Conv2d(8, 10, kernel_size=5),
+        nn.MaxPool2d(2, stride=2),
+        nn.ReLU(True)
+    )
+    # Regressor for the 3 * 2 affine matrix
+    self.fc_loc = nn.Sequential(
+        nn.Linear(10 * 4 * 4, 32),
+        nn.ReLU(True),
+        nn.Linear(32, 3 * 2)
+    )
+    # Initialize the weights/bias with identity transformation
+    self.fc_loc[2].weight.data.zero_()
+    self.fc_loc[2].bias.data.copy_(torch.tensor([1, 0, 0, 0, 1, 0], dtype=torch.float))
+    # -----------------------------------------------
+    
+  # Spatial transformer network forward function
+  def stn(self, x):
+    xs = self.localization(x) # shape: batch x 10 x 4 x 4
+    xs = xs.view(-1, 10 * 4 * 4)
+    theta = self.fc_loc(xs) # batch x 6
+    theta = theta.view(-1, 2, 3)
+    grid = F.affine_grid(theta, x.size())
+    x = F.grid_sample(x, grid)
+    return x
+  
   def forward(self, code):
     img_rec1     = self.dec(code);                               img_rec1_trans = self.transform(img_rec1)
     feats1       = self.enc.forward_branch(img_rec1);             logits1_trans = self.enc(img_rec1_trans)
-    small_feats1 = self.small_enc.forward_branch(img_rec1); small_logits1_trans = self.small_enc(self.transform(img_rec1))
+    small_feats1 = self.small_enc.forward_branch(img_rec1); small_logits1_trans = self.small_enc(img_rec1_trans.data) # note that gradients should not be passed through img_rec1
     img_rec2 = self.dec(feats1[-1])
     feats2   = self.enc.forward_branch(img_rec2)
     return img_rec1, feats1, logits1_trans, small_feats1, small_logits1_trans, img_rec2, feats2
