@@ -39,23 +39,27 @@ if __name__ == "__main__":
   parser = argparse.ArgumentParser(description="Knowledge Transfer")
   parser.add_argument('--e1',  type=str, default="train*/*2/w*/*E17S0*.pth")
   parser.add_argument('--e2',  type=str, default=None)
-  parser.add_argument('--d',   type=str, default="../Ex*/*81/w*/*BD*E76S0*.pth")
+  parser.add_argument('--d',   type=str, default=None)#"../Ex*/*81/w*/*BD*E76S0*.pth")
   parser.add_argument('--gpu', type=int, default=0)
-  parser.add_argument('-b', '--batch_size', type=int, default=64)
+  parser.add_argument('-b', '--batch_size', type=int, default=100)
   parser.add_argument('--test_batch_size',  type=int, default=5)
   parser.add_argument('--lr', type=float, default=5e-4)
-  parser.add_argument('--floss_weight',   type=float, help='loss weight to balance multi-losses', default=1.0)
-  parser.add_argument('--ploss_weight',   type=float, help='loss weight to balance multi-losses', default=2.0)
-  parser.add_argument('--closs_weight',   type=float, help='loss weight to balance multi-losses', default=10)
-  parser.add_argument('--clsloss_weight', type=float, help='loss weight to balance multi-losses', default=1.0)
-  parser.add_argument('--tvloss_weight',  type=float, help='loss weight to balance multi-losses', default=1e-6)
+  # ----------------------------------------------------------------
+  # various losses
+  parser.add_argument('--floss_weight',     type=float, help='loss weight to balance multi-losses', default=1.0)
+  parser.add_argument('--ploss_weight',     type=float, help='loss weight to balance multi-losses', default=2.0)
+  parser.add_argument('--closs_weight',     type=float, help='loss weight to balance multi-losses', default=10)
+  parser.add_argument('--clsloss_weight',   type=float, help='loss weight to balance multi-losses', default=1.0)
+  parser.add_argument('--tvloss_weight',    type=float, help='loss weight to balance multi-losses', default=1e-6)
+  parser.add_argument('--normloss_weight',  type=float, help='loss weight to balance multi-losses', default=1e-4)
+  parser.add_argument('--daloss_weight',    type=float, help='loss weight to balance multi-losses', default=10)
   parser.add_argument('--floss_lw', type=str, default="1-1-1-1-1-1-1")
   parser.add_argument('--ploss_lw', type=str, default="1-1-1-1-1-1-1")
-  parser.add_argument('--closs_lw', type=str, default="1-1")
-  parser.add_argument('-p', '--project_name', type=str, help='the name of project, to save logs etc., will be set in directory, "Experiments"')
+  # ----------------------------------------------------------------
+  parser.add_argument('-p', '--project_name', type=str, default="test")
   parser.add_argument('-r', '--resume', action='store_true', help='if resume, default=False')
   parser.add_argument('-m', '--mode', type=str, help='the training mode name.')
-  parser.add_argument('--num_epoch', type=int, default=1001)
+  parser.add_argument('--num_epoch', type=int, default=96)
   parser.add_argument('--num_step_per_epoch', type=int, default=10000)
   parser.add_argument('--debug', action="store_true")
   parser.add_argument('--num_class', type=int, default=10)
@@ -74,8 +78,6 @@ if __name__ == "__main__":
   assert(args.mode in AutoEncoders.keys())
   
   # Set up directories and logs, etc.
-  if args.debug and args.project_name == None:
-    args.project_name = "test"
   project_path = pjoin("../Experiments", args.project_name)
   rec_img_path = pjoin(project_path, "reconstructed_images")
   weights_path = pjoin(project_path, "weights") # to save torch model
@@ -140,7 +142,6 @@ if __name__ == "__main__":
   # Parse to get stage loss weight
   floss_lw = [float(x) for x in args.floss_lw.split("-")]
   ploss_lw = [float(x) for x in args.ploss_lw.split("-")]
-  closs_lw = [float(x) for x in args.closs_lw.split("-")]
   
   # Optimization  
   optimizer = torch.optim.Adam(ae.parameters(), lr=args.lr)
@@ -188,8 +189,8 @@ if __name__ == "__main__":
         # code loss: KL Divergence
         logits1 = feats1[-1]; logprob1 = nn.functional.log_softmax(logits1, dim=1) 
         logits2 = feats2[-1]; logprob2 = nn.functional.log_softmax(logits2, dim=1)
-        closs1 = nn.KLDivLoss()(logprob1, prob_gt.data) * args.closs_weight * closs_lw[0]
-        closs2 = nn.KLDivLoss()(logprob2, prob_gt.data) * args.closs_weight * closs_lw[1]
+        closs1 = nn.KLDivLoss()(logprob1, prob_gt.data) * args.closs_weight
+        closs2 = nn.KLDivLoss()(logprob2, prob_gt.data) * args.closs_weight
         # perceptual loss
         ploss1 = loss_func(feats2[0], feats1[0].data) * args.ploss_weight * ploss_lw[0]
         ploss2 = loss_func(feats2[1], feats1[1].data) * args.ploss_weight * ploss_lw[1]
@@ -218,8 +219,8 @@ if __name__ == "__main__":
         # code loss: KL Divergence
         logits1 = Sfeats1[-1]; logprob1 = nn.functional.log_softmax(logits1, dim=1)
         logits2 =       feats2[-1]; logprob2 = nn.functional.log_softmax(logits2, dim=1)
-        closs1 = nn.KLDivLoss()(logprob1, prob_gt.data) * args.closs_weight * closs_lw[0]
-        closs2 = nn.KLDivLoss()(logprob2, prob_gt.data) * args.closs_weight * closs_lw[1]
+        closs1 = nn.KLDivLoss()(logprob1, prob_gt.data) * args.closs_weight
+        closs2 = nn.KLDivLoss()(logprob2, prob_gt.data) * args.closs_weight
         # feature reconstruction loss
         floss3 = loss_func(Sfeats1[2], feats1[2].data) * args.floss_weight * floss_lw[2]
         floss4 = loss_func(Sfeats1[3], feats1[3].data) * args.floss_weight * floss_lw[3]
@@ -252,16 +253,16 @@ if __name__ == "__main__":
         )
         
         # img norm, from "2015-CVPR-Understanding Deep Image Representations by Inverting Them"
-        img_norm1 = torch.pow(torch.norm(img_rec1, p=6), 6) * 1e-4
-        img_norm2 = torch.pow(torch.norm(img_rec2, p=6), 6) * 1e-4
+        img_norm1 = torch.pow(torch.norm(img_rec1, p=6), 6) * args.normloss_weight
+        img_norm2 = torch.pow(torch.norm(img_rec2, p=6), 6) * args.normloss_weight
         
         # code reconstruction loss (KL Divergence): train both
         logits1  = feats1[-1];   logprob1 = nn.functional.log_softmax( logits1, dim=1)
         logits2  = feats2[-1];   logprob2 = nn.functional.log_softmax( logits2, dim=1)
         Slogits1 = Sfeats1[-1]; Slogprob1 = nn.functional.log_softmax(Slogits1, dim=1)
-        closs1  = nn.KLDivLoss()( logprob1, prob_gt.data) * args.closs_weight * closs_lw[0]
-        closs2  = nn.KLDivLoss()( logprob2, prob_gt.data) * args.closs_weight * closs_lw[1]
-        Scloss1 = nn.KLDivLoss()(Slogprob1, prob_gt.data) * args.closs_weight * closs_lw[0]
+        closs1  = nn.KLDivLoss()( logprob1, prob_gt.data) * args.closs_weight
+        closs2  = nn.KLDivLoss()( logprob2, prob_gt.data) * args.closs_weight
+        Scloss1 = nn.KLDivLoss()(Slogprob1, prob_gt.data) * args.closs_weight
         
         # feature reconstruction loss: train the small encoder
         floss3 = loss_func(Sfeats1[2], feats1[2].data) * args.floss_weight * floss_lw[2]
@@ -279,21 +280,23 @@ if __name__ == "__main__":
         Scls_loss1  = nn.CrossEntropyLoss()(Slogits1, label.data) * args.clsloss_weight
         
         # semantic consistency loss
-        cls_loss1_DA  = nn.CrossEntropyLoss()( logits1_trans, label.data) * args.clsloss_weight * 10
-        Scls_loss1_DA = nn.CrossEntropyLoss()(Slogits1_trans, label.data) * args.clsloss_weight * 10
+        cls_loss1_DA  = nn.CrossEntropyLoss()( logits1_trans, label.data) * args.daloss_weight
+        Scls_loss1_DA = nn.CrossEntropyLoss()(Slogits1_trans, label.data) * args.daloss_weight
         
-        # total loss
-        loss = closs1 + closs2 + Scloss1 + \
-               ploss1 + ploss2 + ploss3 + ploss4 + \
-               tvloss1 + tvloss2 + \
-               floss3 + floss4 + \
-               cls_loss1 + cls_loss2 + Scls_loss1 + \
-               closs1 / Scloss1.data * 20 + \
-               img_norm1 + img_norm2 + \
-               cls_loss1_DA + Scls_loss1_DA
+        # Total loss settings ----------------------------------------------
+        # (1.1) basic setting: BD fixed, train SE 
+        # loss = Scloss1 + Scls_loss1 + floss3 + floss4 
+        # (1.2) train SE, add DA loss
+        loss = Scloss1 + Scls_loss1 + floss3 + floss4 + Scls_loss1_DA
+               
+        # (2) joint-training: both BD and SE are trainable
+        # loss = closs1 + cls_loss1 + closs2 + cls_loss2 + ploss1 + ploss2 + ploss3 + ploss4 + tvloss1 + tvloss2 + img_norm1 + img_norm2 + cls_loss1_DA + \
+               #Scloss1 + Scls_loss1 + floss3 + floss4 + \
+               #closs1 / Scloss1.data * 20
+        # ------------------------------------------------------------------
         
         # train cls accuracy
-        pred1 = logits1.detach().max(1)[1]; train_acc1 = pred1.eq(label.view_as(pred1)).sum().cpu().data.numpy() / float(args.batch_size)
+        pred1 =       logits1.detach().max(1)[1]; train_acc1 = pred1.eq(label.view_as(pred1)).sum().cpu().data.numpy() / float(args.batch_size)
         pred2 = logits1_trans.detach().max(1)[1]; train_acc2 = pred2.eq(label.view_as(pred2)).sum().cpu().data.numpy() / float(args.batch_size)
       
       optimizer.zero_grad()
@@ -364,8 +367,8 @@ if __name__ == "__main__":
             img_rec1, feats1, img_rec2, feats2 = ae(x)
             logits1 = feats1[-1]; logprob1 = nn.functional.log_softmax(logits1, dim=1)
             logits2 = feats2[-1]; logprob2 = nn.functional.log_softmax(logits2, dim=1)
-            closs1_ = nn.KLDivLoss()(logprob1, prob_gt.data) * args.closs_weight * closs_lw[0]
-            closs2_ = nn.KLDivLoss()(logprob2, prob_gt.data) * args.closs_weight * closs_lw[1]
+            closs1_ = nn.KLDivLoss()(logprob1, prob_gt.data) * args.closs_weight
+            closs2_ = nn.KLDivLoss()(logprob2, prob_gt.data) * args.closs_weight
             closs1_test += closs1_.data.cpu().numpy()
             closs2_test += closs2_.data.cpu().numpy()
             # test cls accuracy
@@ -405,9 +408,9 @@ if __name__ == "__main__":
             Slogits1 = Sfeats1[-1]; Slogprob1 = nn.functional.log_softmax(Slogits1, dim=1)
             
             # code reconstruction loss
-            closs1_  = nn.KLDivLoss()(logprob1,  prob_gt.data) * args.closs_weight * closs_lw[0]
-            closs2_  = nn.KLDivLoss()(logprob2,  prob_gt.data) * args.closs_weight * closs_lw[1]
-            Scloss1_ = nn.KLDivLoss()(Slogprob1, prob_gt.data) * args.closs_weight * closs_lw[0]
+            closs1_  = nn.KLDivLoss()(logprob1,  prob_gt.data) * args.closs_weight
+            closs2_  = nn.KLDivLoss()(logprob2,  prob_gt.data) * args.closs_weight
+            Scloss1_ = nn.KLDivLoss()(Slogprob1, prob_gt.data) * args.closs_weight
             
             closs1_test  +=  closs1_.data.cpu().numpy()
             closs2_test  +=  closs2_.data.cpu().numpy()

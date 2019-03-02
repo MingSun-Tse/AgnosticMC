@@ -174,14 +174,14 @@ class SmallLeNet5(nn.Module):
     return out1, out2, out3, out4, y
 
 # --------------------------------------------------- 
-class Transform(nn.Module):
+class Transform1(nn.Module):
   def __init__(self):
-    super(Transform, self).__init__()
+    super(Transform1, self).__init__()
     kernel = [[[[-1, -1, -1], [-1, 9, -1], [-1, -1, -1]]]]
     kernel = torch.from_numpy(np.array(kernel)).float()
-    self.conv1 = nn.Conv2d(1, 1, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+    self.conv1 = nn.Conv2d(1, 1, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1), bias=False)
     self.conv1.weight = nn.Parameter(kernel)
-    self.drop = nn.Dropout(p=0.05)
+    self.drop = nn.Dropout(p=0.08)
                                      
     for param in self.parameters():
       param.requires_grad = False
@@ -196,7 +196,7 @@ class Transform2(nn.Module): # sharpen
     super(Transform2, self).__init__()
     kernel = [[[[0, -1, 0], [-1, 5, -1], [0, -1, 0]]]]
     kernel = torch.from_numpy(np.array(kernel)).float()
-    self.conv1 = nn.Conv2d(1, 1, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+    self.conv1 = nn.Conv2d(1, 1, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1), bias=False)
     self.conv1.weight = nn.Parameter(kernel)
     self.drop = nn.Dropout(p=0.05)
                                      
@@ -208,7 +208,7 @@ class Transform2(nn.Module): # sharpen
     y = (x + self.drop(y)) / 2
     return y
     
-class Transform3(nn.Module): # translation
+class Transform3(nn.Module): # 8-direction translation
   def __init__(self):
     super(Transform3, self).__init__()
     kernel_left = [[[[0, 0, 0, 0, 0], 
@@ -217,7 +217,7 @@ class Transform3(nn.Module): # translation
                      [0, 0, 0, 0, 0],
                      [0, 0, 0, 0, 0]]]]
     kernel_left = torch.from_numpy(np.array(kernel_left)).float()
-    self.conv_left = nn.Conv2d(1, 1, kernel_size=(5, 5), stride=(1, 1), padding=(2, 2))
+    self.conv_left = nn.Conv2d(1, 1, kernel_size=(5, 5), stride=(1, 1), padding=(2, 2), bias=False)
     self.conv_left.weight = nn.Parameter(kernel_left)
     
     kernel_right = [[[[0, 0, 0, 0, 0], 
@@ -226,7 +226,7 @@ class Transform3(nn.Module): # translation
                       [0, 0, 0, 0, 0],
                       [0, 0, 0, 0, 0]]]]
     kernel_right = torch.from_numpy(np.array(kernel_right)).float()
-    self.conv_right = nn.Conv2d(1, 1, kernel_size=(5, 5), stride=(1, 1), padding=(2, 2))
+    self.conv_right = nn.Conv2d(1, 1, kernel_size=(5, 5), stride=(1, 1), padding=(2, 2), bias=False)
     self.conv_right.weight = nn.Parameter(kernel_right)
     
     kernel_up = [[[[0, 0, 0, 0, 0], 
@@ -235,7 +235,7 @@ class Transform3(nn.Module): # translation
                    [0, 0, 0, 0, 0],
                    [0, 0, 1, 0, 0]]]]
     kernel_up = torch.from_numpy(np.array(kernel_up)).float()
-    self.conv_up = nn.Conv2d(1, 1, kernel_size=(5, 5), stride=(1, 1), padding=(2, 2))
+    self.conv_up = nn.Conv2d(1, 1, kernel_size=(5, 5), stride=(1, 1), padding=(2, 2), bias=False)
     self.conv_up.weight = nn.Parameter(kernel_up)
            
     kernel_down = [[[[0, 0, 1, 0, 0], 
@@ -244,7 +244,7 @@ class Transform3(nn.Module): # translation
                      [0, 0, 0, 0, 0],
                      [0, 0, 0, 0, 0]]]]
     kernel_down = torch.from_numpy(np.array(kernel_down)).float()
-    self.conv_down = nn.Conv2d(1, 1, kernel_size=(5, 5), stride=(1, 1), padding=(2, 2))
+    self.conv_down = nn.Conv2d(1, 1, kernel_size=(5, 5), stride=(1, 1), padding=(2, 2), bias=False)
     self.conv_down.weight = nn.Parameter(kernel_down)  
     
     kernel5 = [[[[1, 0, 0, 0, 0], 
@@ -253,7 +253,7 @@ class Transform3(nn.Module): # translation
                  [0, 0, 0, 0, 0],
                  [0, 0, 0, 0, 0]]]]
     kernel5 = torch.from_numpy(np.array(kernel5)).float()
-    self.conv5 = nn.Conv2d(1, 1, kernel_size=(5, 5), stride=(1, 1), padding=(2, 2))
+    self.conv5 = nn.Conv2d(1, 1, kernel_size=(5, 5), stride=(1, 1), padding=(2, 2), bias=False)
     self.conv5.weight = nn.Parameter(kernel5)
     
     kernel6 = [[[[0, 0, 0, 0, 1], 
@@ -262,7 +262,7 @@ class Transform3(nn.Module): # translation
                  [0, 0, 0, 0, 0],
                  [0, 0, 0, 0, 0]]]]
     kernel6 = torch.from_numpy(np.array(kernel6)).float()
-    self.conv6 = nn.Conv2d(1, 1, kernel_size=(5, 5), stride=(1, 1), padding=(2, 2))
+    self.conv6 = nn.Conv2d(1, 1, kernel_size=(5, 5), stride=(1, 1), padding=(2, 2), bias=False)
     self.conv6.weight = nn.Parameter(kernel6)
     
     kernel7 = [[[[0, 0, 0, 0, 0], 
@@ -271,7 +271,7 @@ class Transform3(nn.Module): # translation
                  [0, 0, 0, 0, 0],
                  [1, 0, 0, 0, 0]]]]
     kernel7 = torch.from_numpy(np.array(kernel7)).float()
-    self.conv7 = nn.Conv2d(1, 1, kernel_size=(5, 5), stride=(1, 1), padding=(2, 2))
+    self.conv7 = nn.Conv2d(1, 1, kernel_size=(5, 5), stride=(1, 1), padding=(2, 2), bias=False)
     self.conv7.weight = nn.Parameter(kernel7)
     
     kernel8 = [[[[0, 0, 0, 0, 0], 
@@ -280,7 +280,7 @@ class Transform3(nn.Module): # translation
                  [0, 0, 0, 0, 0],
                  [0, 0, 0, 0, 1]]]]
     kernel8 = torch.from_numpy(np.array(kernel8)).float()
-    self.conv8 = nn.Conv2d(1, 1, kernel_size=(5, 5), stride=(1, 1), padding=(2, 2))
+    self.conv8 = nn.Conv2d(1, 1, kernel_size=(5, 5), stride=(1, 1), padding=(2, 2), bias=False)
     self.conv8.weight = nn.Parameter(kernel8)
     self.one_hot1 = OneHotCategorical(torch.Tensor([1./8] * 8))
     
@@ -298,38 +298,16 @@ class Transform3(nn.Module): # translation
 class Transform4(nn.Module): # rand translation
   def __init__(self):
     super(Transform4, self).__init__()
-    kernel = [[[[-1, -1, -1], [-1, 9, -1], [-1, -1, -1]]]]
-    kernel = torch.from_numpy(np.array(kernel)).float()
-    self.conv1 = nn.Conv2d(1, 1, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
-    self.conv1.weight = nn.Parameter(kernel)
-    self.conv_trans  = nn.Conv2d(1, 1, kernel_size=(5, 5), stride=(1, 1), padding=(2, 2))
-    self.conv_smooth = nn.Conv2d(1, 1, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
-    self.conv_smooth.weight = nn.Parameter(torch.ones(9).cuda().view(1,1,3,3) * 1/9.)
-    self.drop = nn.Dropout(p=0.05)
-    
-    self.one_hot1 = OneHotCategorical(torch.Tensor([0.4, 0.2, 0.4]))
-    self.one_hot2 = OneHotCategorical(torch.Tensor([0.0625, 0.0250, 0.0625, 0.0250, 0.0625,
-                                                    0.0250, 0.0375, 0.0375, 0.0375, 0.0250,
-                                                    0.0625, 0.0375, 0.0000, 0.0375, 0.0625,
-                                                    0.0250, 0.0375, 0.0375, 0.0375, 0.0250,
-                                                    0.0625, 0.0250, 0.0625, 0.0250, 0.0625])) 
-    
-    for param in self.parameters():
-      param.requires_grad = False
-  
+    self.conv_trans  = nn.Conv2d(1, 1, kernel_size=(5, 5), stride=(1, 1), padding=(2, 2), bias=True)
+    self.one_hot2 = OneHotCategorical(torch.Tensor([1/24., 1/24., 1/24., 1/24., 1/24.,
+                                                    1/24., 1/24., 1/24., 1/24., 1/24.,
+                                                    1/24., 1/24., 0.000, 1/24., 1/24.,
+                                                    1/24., 1/24., 1/24., 1/24., 1/24.,
+                                                    1/24., 1/24., 1/24., 1/24., 1/24.]))
   def forward(self, x):
-    # random translation 
     self.conv_trans.weight = nn.Parameter(self.one_hot2.sample().cuda().view(1,1,5,5))
-    y1 = self.conv_trans(x)
-    
-    # smooth
-    y2 = self.conv_smooth(x)
-    
-    # data dropout
-    y3 = (self.drop(self.conv1(x)) + x) / 2.
-    
-    switch = self.one_hot1.sample().cuda()
-    y = y1 * switch[0] + y2 * switch[1] + y3 * switch[2]
+    y = self.conv_trans(x)
+    self.conv_trans.requires_grad = False
     return y
     
 class Transform5(nn.Module): # combine
@@ -382,7 +360,7 @@ class Transform5(nn.Module): # combine
       param.requires_grad = False
     return y
      
-class Transform6(nn.Module): # resize
+class Transform6(nn.Module): # resize or scale
   def __init__(self):
     super(Transform6, self).__init__()
     self.transform = Transform5()
@@ -412,7 +390,7 @@ class Transform7(nn.Module): # rotate
     theta = torch.from_numpy(np.array(theta)).float().cuda()
     grid = F.affine_grid(theta, x.size())
     x = F.grid_sample(x, grid)
-    return self.transform(x)
+    return x
 # ---------------------------------------------------
 # AutoEncoder part
 Encoder = LeNet5
@@ -459,9 +437,9 @@ class AutoEncoder_BDSE_Trans(nn.Module):
   def __init__(self, e1=None, d=None, e2=None):
     super(AutoEncoder_BDSE_Trans, self).__init__()
     self.enc = Encoder(e1, fixed=True).eval()
-    self.dec = Decoder(d,  fixed=False) # decoder is also trainable
+    self.dec = Decoder(d,  fixed=True) # decoder is also trainable
     self.small_enc = SmallEncoder(e2, fixed=False)
-    self.transform = Transform7()
+    self.transform = Transform6()
   
     # -----Spatial Transformer Network --------------
     # Spatial transformer localization-network
