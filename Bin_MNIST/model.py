@@ -173,7 +173,7 @@ class SmallLeNet5(nn.Module):
     y = self.fc5(y)
     return out1, out2, out3, out4, y
 
-# --------------------------------------------------- 
+# ---------------------------------------------------
 class Transform1(nn.Module):
   def __init__(self):
     super(Transform1, self).__init__()
@@ -191,22 +191,12 @@ class Transform1(nn.Module):
     y = (x + self.drop(y)) / 2
     return y
     
-class Transform2(nn.Module): # sharpen
+class Transform2(nn.Module): # drop out
   def __init__(self):
     super(Transform2, self).__init__()
-    kernel = [[[[0, -1, 0], [-1, 5, -1], [0, -1, 0]]]]
-    kernel = torch.from_numpy(np.array(kernel)).float()
-    self.conv1 = nn.Conv2d(1, 1, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1), bias=False)
-    self.conv1.weight = nn.Parameter(kernel)
     self.drop = nn.Dropout(p=0.05)
-                                     
-    for param in self.parameters():
-      param.requires_grad = False
-  
   def forward(self, x):
-    y = self.conv1(x)
-    y = (x + self.drop(y)) / 2
-    return y
+    return self.drop(x)
     
 class Transform3(nn.Module): # 8-direction translation
   def __init__(self):
@@ -363,7 +353,6 @@ class Transform5(nn.Module): # combine
 class Transform6(nn.Module): # resize or scale
   def __init__(self):
     super(Transform6, self).__init__()
-    self.transform = Transform5()
     
   def forward(self, x):
     rand_scale = np.random.rand() * 0.05 + 1.03125
@@ -376,21 +365,70 @@ class Transform6(nn.Module): # resize or scale
 class Transform7(nn.Module): # rotate
   def __init__(self):
     super(Transform7, self).__init__()
-    self.transform = Transform5().eval()
     
   def forward(self, x):
     theta = []
     for _ in range(x.shape[0]):
-      angle = np.random.randint(-3, 3) / 180.0 * math.pi
-      trans = np.arange(-2, 3) / 32.
-      trans1 = trans[np.random.randint(len(trans))]
-      trans2 = trans[np.random.randint(len(trans))]
-      theta.append([[math.cos(angle), -math.sin(angle), trans1],
-                    [math.sin(angle),  math.cos(angle), trans2]])
+      angle = np.random.randint(-5, 6) / 180.0 * math.pi
+      # trans = np.arange(-2, 3) / 32. # 32: the width/height of the MNIST image is 32x32
+      # trans1 = trans[np.random.randint(len(trans))]
+      # trans2 = trans[np.random.randint(len(trans))]
+      theta.append([[math.cos(angle), -math.sin(angle), 0],
+                    [math.sin(angle),  math.cos(angle), 0]])
     theta = torch.from_numpy(np.array(theta)).float().cuda()
     grid = F.affine_grid(theta, x.size())
     x = F.grid_sample(x, grid)
     return x
+    
+class Transform9(nn.Module): # sharpen
+  def __init__(self):
+    super(Transform9, self).__init__()
+    kernel = [[[[-1, -1, -1], [-1, 9, -1], [-1, -1, -1]]]]
+    kernel = torch.from_numpy(np.array(kernel)).float()
+    self.conv1 = nn.Conv2d(1, 1, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1), bias=False)
+    self.conv1.weight = nn.Parameter(kernel)
+    self.conv1.requires_grad = False
+  
+  def forward(self, x):
+    return self.conv1(x)
+    
+class Transform10(nn.Module): # smooth
+  def __init__(self):
+    super(Transform10, self).__init__()
+    kernel = [[[[1, 2, 1], [2, 4, 1], [1, 2, 1]]]] # Gaussian smoothing
+    kernel = torch.from_numpy(np.array(kernel)).float() * 0.0625
+    self.conv1 = nn.Conv2d(1, 1, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1), bias=False)
+    self.conv1.weight = nn.Parameter(kernel)
+    self.conv1.requires_grad = False
+  
+  def forward(self, x):
+    return self.conv1(x)
+    
+class Transform8(nn.Module): # random transform combination
+  def __init__(self):
+    super(Transform8, self).__init__()
+    self.T2 = Transform2()
+    self.T4 = Transform4()
+    self.T6 = Transform6()
+    self.T7 = Transform7()
+    self.T9 = Transform9()
+    self.T10 = Transform10()
+    self.transforms = [self.T2, self.T4, self.T6, self.T7, self.T9, self.T10]
+    # for name, value in vars(self).items():
+      # print(name)
+      # if name[0] == "T" and name[1:].isdigit():
+        # self.transforms.append(eval("self.%s" % name))
+    self.transforms = np.array(self.transforms)
+    print(self.transforms)
+    
+  def forward(self, y):
+    rand = np.random.permutation(len(self.transforms))
+    Ts = self.transforms[rand]
+    for T in Ts:
+      if np.random.rand() >= 0.5:
+        y = T(y)
+    return y    
+    
 # ---------------------------------------------------
 # AutoEncoder part
 Encoder = LeNet5
@@ -437,9 +475,9 @@ class AutoEncoder_BDSE_Trans(nn.Module):
   def __init__(self, e1=None, d=None, e2=None):
     super(AutoEncoder_BDSE_Trans, self).__init__()
     self.enc = Encoder(e1, fixed=True).eval()
-    self.dec = Decoder(d,  fixed=True) # decoder is also trainable
+    self.dec = Decoder(d,  fixed=False) # decoder is also trainable
     self.small_enc = SmallEncoder(e2, fixed=False)
-    self.transform = Transform6()
+    self.transform = Transform8()
   
     # -----Spatial Transformer Network --------------
     # Spatial transformer localization-network

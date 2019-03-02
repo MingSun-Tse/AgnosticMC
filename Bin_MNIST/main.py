@@ -287,12 +287,12 @@ if __name__ == "__main__":
         # (1.1) basic setting: BD fixed, train SE 
         # loss = Scloss1 + Scls_loss1 + floss3 + floss4 
         # (1.2) train SE, add DA loss
-        loss = Scloss1 + Scls_loss1 + floss3 + floss4 + Scls_loss1_DA
+        # loss = Scloss1 + Scls_loss1 + floss3 + floss4 + Scls_loss1_DA
                
         # (2) joint-training: both BD and SE are trainable
-        # loss = closs1 + cls_loss1 + closs2 + cls_loss2 + ploss1 + ploss2 + ploss3 + ploss4 + tvloss1 + tvloss2 + img_norm1 + img_norm2 + cls_loss1_DA + \
-               #Scloss1 + Scls_loss1 + floss3 + floss4 + \
-               #closs1 / Scloss1.data * 20
+        loss = closs1 + cls_loss1 + closs2 + cls_loss2 + ploss1 + ploss2 + ploss3 + ploss4 + tvloss1 + tvloss2 + img_norm1 + img_norm2 + cls_loss1_DA + \
+               Scloss1 + Scls_loss1 + floss3 + floss4 + \
+               closs1 / Scloss1.data * 20
         # ------------------------------------------------------------------
         
         # train cls accuracy
