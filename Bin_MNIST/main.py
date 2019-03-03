@@ -65,7 +65,7 @@ if __name__ == "__main__":
   parser.add_argument('--debug', action="store_true")
   parser.add_argument('--num_class', type=int, default=10)
   parser.add_argument('--use_pseudo_code', action="store_false")
-  parser.add_argument('--begin', type=float, default=30)
+  parser.add_argument('--begin', type=float, default=25)
   parser.add_argument('--end',   type=float, default=20)
   parser.add_argument('--Temp',  type=float, default=1, help="the Tempature in KD")
   args = parser.parse_args()
@@ -270,6 +270,12 @@ if __name__ == "__main__":
         hardloss1_DA  = nn.CrossEntropyLoss()( logits1_DA, label.data) * args.daloss_weight
         Shardloss1_DA = nn.CrossEntropyLoss()(Slogits1_DA, label.data) * args.daloss_weight
         
+        # adversarial loss: Decoder should generate the images that can be "recognized" by the Encoder but "unrecognized" by the SE.
+        # for decoder
+        # loss_BD = hardloss1 - Shardloss1
+        # loss_SE = Shardloss1
+        
+        
         # Total loss settings ----------------------------------------------
         # (1.1) basic setting: BD fixed, train SE 
         # loss = Ssoftloss1 + Shardloss1 + floss3 + floss4 
@@ -278,7 +284,7 @@ if __name__ == "__main__":
                
         # (2) joint-training: both BD and SE are trainable
         loss = softloss1 + hardloss1 + softloss2 + hardloss2 + ploss1 + ploss2 + ploss3 + ploss4 + tvloss1 + tvloss2 + img_norm1 + img_norm2 + hardloss1_DA + \
-               Ssoftloss1 + Shardloss1 + floss3 + floss4 + \
+               Ssoftloss1 + Shardloss1 + floss3 + floss4 + Shardloss1_DA + \
                softloss1 / Ssoftloss1.data * args.adverloss_weight
         # ------------------------------------------------------------------
         
