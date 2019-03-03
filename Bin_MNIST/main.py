@@ -178,14 +178,10 @@ if __name__ == "__main__":
       if args.mode == "BD":
         img_rec1, feats1, img_rec2, feats2 = ae(x)
         # total variation loss
-        tvloss1 = args.tvloss_weight * (
-                torch.sum(torch.abs(img_rec1[:, :, :, :-1] - img_rec1[:, :, :, 1:])) + 
-                torch.sum(torch.abs(img_rec1[:, :, :-1, :] - img_rec1[:, :, 1:, :]))
-        )
-        tvloss2 = args.tvloss_weight * (
-                torch.sum(torch.abs(img_rec2[:, :, :, :-1] - img_rec2[:, :, :, 1:])) + 
-                torch.sum(torch.abs(img_rec2[:, :, :-1, :] - img_rec2[:, :, 1:, :]))
-        )
+        tvloss1 = args.tvloss_weight * (torch.sum(torch.abs(img_rec1[:, :, :, :-1] - img_rec1[:, :, :, 1:])) + 
+                                        torch.sum(torch.abs(img_rec1[:, :, :-1, :] - img_rec1[:, :, 1:, :])))
+        tvloss2 = args.tvloss_weight * (torch.sum(torch.abs(img_rec2[:, :, :, :-1] - img_rec2[:, :, :, 1:])) + 
+                                        torch.sum(torch.abs(img_rec2[:, :, :-1, :] - img_rec2[:, :, 1:, :])))
         # code loss: KL Divergence
         logits1 = feats1[-1]; logprob1 = F.log_softmax(logits1/args.Temp, dim=1) 
         logits2 = feats2[-1]; logprob2 = F.log_softmax(logits2/args.Temp, dim=1)
@@ -208,14 +204,10 @@ if __name__ == "__main__":
       elif args.mode == "SE":
         img_rec1, feats1, Sfeats1, img_rec2, feats2 = ae(x)
         # total variation loss
-        tvloss1 = args.tvloss_weight * (
-                torch.sum(torch.abs(img_rec1[:, :, :, :-1] - img_rec1[:, :, :, 1:])) + 
-                torch.sum(torch.abs(img_rec1[:, :, :-1, :] - img_rec1[:, :, 1:, :]))
-        )
-        tvloss2 = args.tvloss_weight * (
-                torch.sum(torch.abs(img_rec2[:, :, :, :-1] - img_rec2[:, :, :, 1:])) + 
-                torch.sum(torch.abs(img_rec2[:, :, :-1, :] - img_rec2[:, :, 1:, :]))
-        )
+        tvloss1 = args.tvloss_weight * (torch.sum(torch.abs(img_rec1[:, :, :, :-1] - img_rec1[:, :, :, 1:])) + 
+                                        torch.sum(torch.abs(img_rec1[:, :, :-1, :] - img_rec1[:, :, 1:, :])))
+        tvloss2 = args.tvloss_weight * (torch.sum(torch.abs(img_rec2[:, :, :, :-1] - img_rec2[:, :, :, 1:])) + 
+                                        torch.sum(torch.abs(img_rec2[:, :, :-1, :] - img_rec2[:, :, 1:, :])))
         # code loss: KL Divergence
         logits1 = Sfeats1[-1]; logprob1 = F.log_softmax(logits1/args.Temp, dim=1)
         logits2 =  feats2[-1]; logprob2 = F.log_softmax(logits2/args.Temp, dim=1)
@@ -318,7 +310,7 @@ if __name__ == "__main__":
       # Print training loss
       if step % SHOW_INTERVAL == 0:
         if args.mode in ["BD", "BDSE"]:
-          format_str = "E{}S{} loss={:.3f} | softloss: {:.5f} {:.5f} | tvloss: {:.5f} {:.5f} | img_norm: {:.5f} {:.5f} | hardloss: {:.5f}({:.4f}) {:.5f}({:.4f}) {:.5f} | ploss: {:.5f} {:.5f} {:.5f} {:.5f} ({:.3f}s/step)"
+          format_str = "E{}S{} loss: {:.3f} | soft: {:.5f} {:.5f} | tv: {:.5f} {:.5f} | norm: {:.5f} {:.5f} | hard: {:.5f}({:.4f}) {:.5f}({:.4f}) {:.5f} | p: {:.5f} {:.5f} {:.5f} {:.5f} ({:.3f}s/step)"
           logprint(format_str.format(epoch, step, loss.data.cpu().numpy(), softloss1.data.cpu().numpy(), softloss2.data.cpu().numpy(),
               tvloss1.data.cpu().numpy(), tvloss2.data.cpu().numpy(),
               img_norm1.data.cpu().numpy(), img_norm2.data.cpu().numpy(),
@@ -327,7 +319,7 @@ if __name__ == "__main__":
               (time.time()-t1)/SHOW_INTERVAL), log)
         
         elif args.mode == "SE":
-          format_str = "E{}S{} loss={:.3f} | softloss: {:.5f} {:.5f} | tvloss: {:.5f} {:.5f} | hardloss: {:.5f}({:.4f}) {:.5f}({:.4f}) | floss: {:.5f} {:.5f} | ploss: {:.5f} {:.5f} {:.5f} {:.5f} ({:.3f}s/step)"
+          format_str = "E{}S{} loss: {:.3f} | soft: {:.5f} {:.5f} | tv: {:.5f} {:.5f} | hard: {:.5f}({:.4f}) {:.5f}({:.4f}) | f: {:.5f} {:.5f} | p: {:.5f} {:.5f} {:.5f} {:.5f} ({:.3f}s/step)"
           logprint(format_str.format(epoch, step, loss.data.cpu().numpy(), softloss1.data.cpu().numpy(), softloss2.data.cpu().numpy(),
               tvloss1.data.cpu().numpy(), tvloss2.data.cpu().numpy(),
               hardloss1.data.cpu().numpy(), train_acc1, hardloss2.data.cpu().numpy(), train_acc2,
