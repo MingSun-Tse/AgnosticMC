@@ -172,6 +172,7 @@ if __name__ == "__main__":
       else:
         x = ae.enc(img.cuda()) / args.Temp
       prob_gt = F.softmax(x, dim=1) # prob, ground truth
+      label = label.cuda()
               
       # forward
       if args.mode == "BD":
