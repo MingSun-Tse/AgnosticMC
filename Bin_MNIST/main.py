@@ -52,6 +52,7 @@ if __name__ == "__main__":
   parser.add_argument('--tvloss_weight',   type=float, default=1e-6)
   parser.add_argument('--normloss_weight', type=float, default=1e-4)
   parser.add_argument('--daloss_weight',   type=float, default=10)
+  parser.add_argument('--adverloss_weight',type=float, default=20)
   parser.add_argument('--floss_lw', type=str, default="1-1-1-1-1-1-1")
   parser.add_argument('--ploss_lw', type=str, default="1-1-1-1-1-1-1")
   # ----------------------------------------------------------------
@@ -64,8 +65,8 @@ if __name__ == "__main__":
   parser.add_argument('--debug', action="store_true")
   parser.add_argument('--num_class', type=int, default=10)
   parser.add_argument('--use_pseudo_code', action="store_false")
-  parser.add_argument('--begin', type=float, default=40)
-  parser.add_argument('--end',   type=float, default=25)
+  parser.add_argument('--begin', type=float, default=30)
+  parser.add_argument('--end',   type=float, default=20)
   parser.add_argument('--Temp',  type=float, default=1, help="the Tempature in KD")
   args = parser.parse_args()
   
@@ -232,7 +233,7 @@ if __name__ == "__main__":
       
       elif args.mode == "BDSE":
         # forward
-        img_rec1, feats1, logits1_trans, Sfeats1, Slogits1_trans, img_rec2, feats2 = ae(x)
+        img_rec1, feats1, logits1_DA, Sfeats1, Slogits1_DA, img_rec2, feats2 = ae(x)
         
         # total variation loss and image norm loss, from "2015-CVPR-Understanding Deep Image Representations by Inverting Them"
         tvloss1 = args.tvloss_weight * (torch.sum(torch.abs(img_rec1[:, :, :, :-1] - img_rec1[:, :, :, 1:])) + 
@@ -261,13 +262,13 @@ if __name__ == "__main__":
         ploss4 = loss_func(feats2[3], feats1[3].data) * args.ploss_weight * ploss_lw[3]
         
         # hard target loss: train both 
-        hardloss1   = nn.CrossEntropyLoss()( logits1, label.data) * args.hardloss_weight
-        hardloss2   = nn.CrossEntropyLoss()( logits2, label.data) * args.hardloss_weight
-        Shardloss1  = nn.CrossEntropyLoss()(Slogits1, label.data) * args.hardloss_weight
+        hardloss1  = nn.CrossEntropyLoss()( logits1, label.data) * args.hardloss_weight
+        hardloss2  = nn.CrossEntropyLoss()( logits2, label.data) * args.hardloss_weight
+        Shardloss1 = nn.CrossEntropyLoss()(Slogits1, label.data) * args.hardloss_weight
         
         # semantic consistency loss
-        hardloss1_DA  = nn.CrossEntropyLoss()( logits1_trans, label.data) * args.daloss_weight
-        Shardloss1_DA = nn.CrossEntropyLoss()(Slogits1_trans, label.data) * args.daloss_weight
+        hardloss1_DA  = nn.CrossEntropyLoss()( logits1_DA, label.data) * args.daloss_weight
+        Shardloss1_DA = nn.CrossEntropyLoss()(Slogits1_DA, label.data) * args.daloss_weight
         
         # Total loss settings ----------------------------------------------
         # (1.1) basic setting: BD fixed, train SE 
@@ -278,12 +279,12 @@ if __name__ == "__main__":
         # (2) joint-training: both BD and SE are trainable
         loss = softloss1 + hardloss1 + softloss2 + hardloss2 + ploss1 + ploss2 + ploss3 + ploss4 + tvloss1 + tvloss2 + img_norm1 + img_norm2 + hardloss1_DA + \
                Ssoftloss1 + Shardloss1 + floss3 + floss4 + \
-               softloss1 / Ssoftloss1.data * 20
+               softloss1 / Ssoftloss1.data * args.adverloss_weight
         # ------------------------------------------------------------------
         
         # train cls accuracy
         pred1 =       logits1.detach().max(1)[1]; train_acc1 = pred1.eq(label.view_as(pred1)).sum().cpu().data.numpy() / float(args.batch_size)
-        pred2 = logits1_trans.detach().max(1)[1]; train_acc2 = pred2.eq(label.view_as(pred2)).sum().cpu().data.numpy() / float(args.batch_size)
+        pred2 = logits1_DA.detach().max(1)[1]; train_acc2 = pred2.eq(label.view_as(pred2)).sum().cpu().data.numpy() / float(args.batch_size)
       
       optimizer.zero_grad()
       loss.backward()
@@ -387,7 +388,7 @@ if __name__ == "__main__":
             prob_gt = F.softmax(x, dim=1)
             
             # forward
-            img_rec1, feats1, logits1_trans, Sfeats1, Slogits1_trans, img_rec2, feats2 = ae(x)
+            img_rec1, feats1, logits1_DA, Sfeats1, Slogits1_DA, img_rec2, feats2 = ae(x)
             
             logits1  =  feats1[-1];  logprob1 = F.log_softmax( logits1, dim=1)
             logits2  =  feats2[-1];  logprob2 = F.log_softmax( logits2, dim=1)

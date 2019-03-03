@@ -194,7 +194,7 @@ class Transform1(nn.Module):
 class Transform2(nn.Module): # drop out
   def __init__(self):
     super(Transform2, self).__init__()
-    self.drop = nn.Dropout(p=0.05)
+    self.drop = nn.Dropout(p=0.08)
   def forward(self, x):
     return self.drop(x)
     
