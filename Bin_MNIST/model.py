@@ -518,9 +518,18 @@ class AutoEncoder_BDSE_Trans(nn.Module):
     feats2   = self.enc.forward_branch(img_rec2)
     return img_rec1, feats1, logits1_trans, small_feats1, small_logits1_trans, img_rec2, feats2
     
+class AutoEncoder_BDSE_GAN(nn.Module):
+  def __init__(self, e1=None, d=None, e2=None):
+    super(AutoEncoder_BDSE_GAN, self).__init__()
+    self.enc = Encoder(e1, fixed=True).eval()
+    self.dec = Decoder(d,  fixed=False) # decoder is also trainable
+    self.advbe = Encoder(None, fixed=False) # adversarial encoder
+    self.small_enc = SmallEncoder(e2, fixed=False)
+    self.transform = Transform8()
+    
 AutoEncoders = {
 "BD": AutoEncoder_BD,
 "SE": AutoEncoder_SE,
-"BDSE": AutoEncoder_BDSE_Trans,
+"BDSE": AutoEncoder_BDSE_GAN,
 }
   
