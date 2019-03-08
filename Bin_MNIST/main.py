@@ -40,9 +40,11 @@ if __name__ == "__main__":
   parser = argparse.ArgumentParser(description="Knowledge Transfer")
   parser.add_argument('--e1',  type=str,   default="train*/*2/w*/*E17S0*.pth")
   parser.add_argument('--e2',  type=str,   default=None)
-  parser.add_argument('--d',   type=str,   default=None)#"../Ex*/*81/w*/*BD*E76S0*.pth")
+  parser.add_argument('--d',   type=str,   default=None)# "../Ex*/*81/w*/*BD*E76S0*.pth")  # "../Ex*/test/w*/*1559_BD_E508S0*.pth"
   parser.add_argument('--gpu', type=int,   default=0)
   parser.add_argument('--lr',  type=float, default=5e-4)
+  parser.add_argument('--b1',  type=float, default=5e-4, help='adam: decay of first order momentum of gradient')
+  parser.add_argument('--b2',  type=float, default=5e-4, help='adam: decay of second order momentum of gradient')
   # ----------------------------------------------------------------
   # various losses
   parser.add_argument('--floss_weight',    type=float, default=1)
@@ -165,11 +167,11 @@ if __name__ == "__main__":
   
   # Optimization
   if args.adv_train:
-    optimizer_SE    = torch.optim.Adam(ae.small_enc.parameters(), lr=args.lr)
-    optimizer_BD    = torch.optim.Adam(ae.dec.parameters(), lr=args.lr)
-    optimizer_AdvBE = torch.optim.Adam(ae.advbe.parameters(), lr=args.lr)
+    optimizer_SE    = torch.optim.Adam(ae.small_enc.parameters(), lr=args.lr, betas=(args.b1, args.b2))
+    optimizer_BD    = torch.optim.Adam(ae.dec.parameters(), lr=args.lr, betas=(args.b1, args.b2))
+    optimizer_AdvBE = torch.optim.Adam(ae.advbe.parameters(), lr=args.lr, betas=(args.b1, args.b2))
   else:
-    optimizer = torch.optim.Adam(ae.parameters(), lr=args.lr)
+    optimizer = torch.optim.Adam(ae.parameters(), lr=args.lr, betas=(args.b1, args.b2))
   loss_func = nn.MSELoss()
   
   # Resume previous step
@@ -263,8 +265,11 @@ if __name__ == "__main__":
         pred_BE_DA = logits1_DA.detach().max(1)[1]; trainacc_BE_DA = pred_BE_DA.eq(label.view_as(pred_BE_DA)).sum().cpu().data.numpy() / float(args.batch_size)
         
         # total loss
-        loss_BDSE = (hardloss1 + hardloss1_DA) + (tvloss1 + img_norm1) + (Ssoftloss + Shardloss + Shardloss_DA) \
-                  - (hardloss1_AdvBE_) * args.alpha # (ploss1 + ploss2 + ploss3 + ploss4)
+        loss_BDSE = (hardloss1 + hardloss1_DA + softloss1 + softloss2) + (tvloss1 + img_norm1) + (Ssoftloss + Shardloss + Shardloss_DA) \
+                  + (ploss1 + ploss2 + ploss3 + ploss4) \
+                  + tvloss2 + img_norm2 \
+                  - (hardloss1_AdvBE_) * args.alpha \
+                  - softloss1 / Ssoftloss.data * args.advloss_weight
                   
         if step % args.G_update_interval == 0:
           loss_BDSE.backward()
