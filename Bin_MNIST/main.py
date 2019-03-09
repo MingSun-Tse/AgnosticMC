@@ -146,14 +146,14 @@ if __name__ == "__main__":
                                 transforms.Normalize((0.1307,), (0.3081,))])
                              )
   kwargs = {'num_workers': 4, 'pin_memory': True}
-  train_loader = torch.utils.data.DataLoader(data_train, batch_size=args.batch_size,      shuffle=True, **kwargs)
+  train_loader = torch.utils.data.DataLoader(data_train, batch_size=args.batch_size, shuffle=True, **kwargs)
   
   
   # Prepare transform and one hot generator
   one_hot = OneHotCategorical(torch.Tensor([1./args.num_class] * args.num_class))
   
   # Prepare test code
-  onehot_label = one_hot.sample_n(args.test_batch_size)
+  onehot_label = torch.eye(10)
   test_codes = torch.randn([args.test_batch_size, args.num_class]) * 5.0 + onehot_label * args.begin
   test_labels = onehot_label.data.numpy().argmax(axis=1)
   np.save(pjoin(rec_img_path, "test_codes.npy"), test_codes.data.cpu().numpy())

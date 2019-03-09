@@ -404,6 +404,19 @@ class Transform10(nn.Module): # smooth
   def forward(self, x):
     return self.conv1(x)
     
+class Transform11(nn.Module):
+  def __init__(self):
+    super(Transform11, self).__init__()
+    kernel = [[[[1, 2, 1], [2, 4, 1], [1, 2, 1]]]] # Gaussian smoothing
+    kernel = torch.from_numpy(np.array(kernel)).float() * 0.0625
+    self.conv1 = nn.Conv2d(1, 1, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1), bias=False)
+    self.conv1.weight = nn.Parameter(kernel)
+    self.conv1.requires_grad = False
+  
+  def forward(self, x):
+    return self.conv1(x)
+    
+    
 class Transform8(nn.Module): # random transform combination
   def __init__(self):
     super(Transform8, self).__init__()
@@ -428,7 +441,7 @@ class Transform8(nn.Module): # random transform combination
       if np.random.rand() >= 0.5:
         y = T(y)
     return y    
-    
+
 # ---------------------------------------------------
 # AutoEncoder part
 Encoder = LeNet5
