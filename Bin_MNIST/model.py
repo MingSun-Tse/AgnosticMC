@@ -501,7 +501,7 @@ class Transform8(nn.Module): # random transform combination
 # ---------------------------------------------------
 # AutoEncoder part
 Encoder = LeNet5
-Decoder = DLeNet5
+Decoder = DLeNet5_drop
 SmallEncoder = SmallLeNet5
 AdvEncoder = LeNet5_drop
 
