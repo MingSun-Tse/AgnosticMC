@@ -173,6 +173,32 @@ class SmallLeNet5(nn.Module):
     y = self.fc5(y)
     return out1, out2, out3, out4, y
 
+class LearnedTransform(nn.Module):
+  def __init__(self, model=None, fixed=False):
+    super(LearnedTransform, self).__init__()
+    self.fixed = fixed
+    
+    self.conv1 = nn.Conv2d( 1, 16, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+    self.conv2 = nn.Conv2d(16, 32, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+    self.conv3 = nn.Conv2d(32, 32, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+    self.conv4 = nn.Conv2d(32, 16, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+    self.conv5 = nn.Conv2d(16,  1, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+    self.relu = nn.ReLU(inplace=True)
+    
+    if model:
+      self.load_state_dict(torch.load(model))
+    if fixed:
+      for param in self.parameters():
+          param.requires_grad = False
+      
+  def forward(self, y):
+    y = self.relu(self.conv1(y))
+    y = self.relu(self.conv2(y))
+    y = self.relu(self.conv3(y))
+    y = self.relu(self.conv4(y))
+    y = self.relu(self.conv5(y))
+    return y
+  
 # ---------------------------------------------------
 class Transform1(nn.Module):
   def __init__(self):
@@ -415,7 +441,7 @@ class Transform11(nn.Module):
   
   def forward(self, x):
     return self.conv1(x)
-    
+  
     
 class Transform8(nn.Module): # random transform combination
   def __init__(self):
@@ -540,9 +566,20 @@ class AutoEncoder_BDSE_GAN(nn.Module):
     self.small_enc = SmallEncoder(e2, fixed=False)
     self.transform = Transform8()
     
+class AutoEncoder_BDSE_GAN2(nn.Module):
+  def __init__(self, e1=None, d=None, e2=None, trans_model=None):
+    super(AutoEncoder_BDSE_GAN2, self).__init__()
+    self.enc = Encoder(e1, fixed=True).eval()
+    self.dec = Decoder(d,  fixed=False)
+    self.advbe = Encoder(None, fixed=False) # adversarial encoder
+    self.small_enc = SmallEncoder(e2, fixed=False)
+    self.learned_trans = LearnedTransform(trans_model, fixed=False)
+    self.defined_trans = Transform3()
+    
+    
 AutoEncoders = {
 "BD": AutoEncoder_BD,
 "SE": AutoEncoder_SE,
-"BDSE": AutoEncoder_BDSE_GAN,
+"BDSE": AutoEncoder_BDSE_GAN2,
 }
   

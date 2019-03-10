@@ -41,6 +41,7 @@ if __name__ == "__main__":
   parser.add_argument('--e1',  type=str,   default="train*/*2/w*/*E17S0*.pth")
   parser.add_argument('--e2',  type=str,   default=None)
   parser.add_argument('--d',   type=str,   default=None)# "../Ex*/*81/w*/*BD*E76S0*.pth")  # "../Ex*/test/w*/*1559_BD_E508S0*.pth"
+  parser.add_argument('--t',   type=str,   default=None)
   parser.add_argument('--gpu', type=int,   default=0)
   parser.add_argument('--lr',  type=float, default=5e-4)
   parser.add_argument('--b1',  type=float, default=5e-4, help='adam: decay of first order momentum of gradient')
@@ -70,8 +71,8 @@ if __name__ == "__main__":
   parser.add_argument('--begin', type=float, default=25)
   parser.add_argument('--end',   type=float, default=20)
   parser.add_argument('--Temp',  type=float, default=1, help="the Tempature in KD")
-  parser.add_argument('--adv_train', action="store_true")
-  parser.add_argument('--alpha', type=float, default=0.5)
+  parser.add_argument('--adv_train', type=int, default=0)
+  parser.add_argument('--alpha', type=float, default=0.5, help="the multiplier for discriminator loss")
   parser.add_argument('--G_update_interval', type=int, default=1)
   parser.add_argument('--EMA', type=float, default=0.99, help="Exponential Moving Average") 
   args = parser.parse_args()
@@ -80,6 +81,7 @@ if __name__ == "__main__":
   args.e1 = glob.glob(args.e1)[0] if args.e1 != None else None
   args.e2 = glob.glob(args.e2)[0] if args.e2 != None else None
   args.d  = glob.glob(args.d )[0] if args.d  != None else None
+  args.t  = glob.glob(args.t )[0] if args.t  != None else None
   
   # Check mode
   assert(args.mode in AutoEncoders.keys())
@@ -104,11 +106,19 @@ if __name__ == "__main__":
   
   # Set up model
   AE = AutoEncoders[args.mode]
-  ae = AE(args.e1, args.d, args.e2)
+  if args.adv_train in [0, 1]:
+    ae = AE(args.e1, args.d, args.e2)
+  elif args.adv_train == 2:
+    ae = AE(args.e1, args.d, args.e2, args.t)
   ae.cuda()
   
   # Set up exponential moving average
-  if args.adv_train:
+  if args.adv_train == 0:
+    ema = EMA(args.EMA)
+    for name, param in ae.named_parameters():
+      if param.requires_grad:
+        ema.register(name, param.data)
+  elif args.adv_train == 1:
     ema_BD = EMA(args.EMA)
     ema_SE = EMA(args.EMA)
     ema_AdvBE = EMA(args.EMA)
@@ -121,13 +131,24 @@ if __name__ == "__main__":
     for name, param in ae.advbe.named_parameters():
       if param.requires_grad:
         ema_AdvBE.register(name, param.data)
-        
-  else:
-    ema = EMA(args.EMA)
-    for name, param in ae.named_parameters():
+  elif args.adv_train == 2:
+    ema_BD = EMA(args.EMA)
+    ema_SE = EMA(args.EMA)
+    ema_AdvBE = EMA(args.EMA)
+    ema_trans = EMA(args.EMA)
+    for name, param in ae.dec.named_parameters():
       if param.requires_grad:
-        ema.register(name, param.data)
-  
+        ema_BD.register(name, param.data)
+    for name, param in ae.small_enc.named_parameters():
+      if param.requires_grad:
+        ema_SE.register(name, param.data)
+    for name, param in ae.advbe.named_parameters():
+      if param.requires_grad:
+        ema_AdvBE.register(name, param.data)
+    for name, param in ae.learned_trans.named_parameters():
+      if param.requires_grad:
+        ema_trans.register(name, param.data)
+        
   # Prepare data
   data_train = datasets.MNIST('./MNIST_data',
                               train=True,
@@ -154,7 +175,7 @@ if __name__ == "__main__":
   
   # Prepare test code
   onehot_label = torch.eye(10)
-  test_codes = torch.randn([args.test_batch_size, args.num_class]) * 5.0 + onehot_label * args.begin
+  test_codes = torch.randn([args.num_class, args.num_class]) * 5.0 + onehot_label * args.begin
   test_labels = onehot_label.data.numpy().argmax(axis=1)
   np.save(pjoin(rec_img_path, "test_codes.npy"), test_codes.data.cpu().numpy())
   
@@ -166,13 +187,17 @@ if __name__ == "__main__":
   ploss_lw = [float(x) for x in args.ploss_lw.split("-")]
   
   # Optimization
-  if args.adv_train:
+  if args.adv_train == 0:
+    optimizer = torch.optim.Adam(ae.parameters(), lr=args.lr, betas=(args.b1, args.b2))
+  elif args.adv_train == 1:
     optimizer_SE    = torch.optim.Adam(ae.small_enc.parameters(), lr=args.lr, betas=(args.b1, args.b2))
     optimizer_BD    = torch.optim.Adam(ae.dec.parameters(), lr=args.lr, betas=(args.b1, args.b2))
     optimizer_AdvBE = torch.optim.Adam(ae.advbe.parameters(), lr=args.lr, betas=(args.b1, args.b2))
-  else:
-    optimizer = torch.optim.Adam(ae.parameters(), lr=args.lr, betas=(args.b1, args.b2))
-  loss_func = nn.MSELoss()
+  elif args.adv_train == 2:
+    optimizer_SE    = torch.optim.Adam(ae.small_enc.parameters(), lr=args.lr, betas=(args.b1, args.b2))
+    optimizer_BD    = torch.optim.Adam(ae.dec.parameters(), lr=args.lr, betas=(args.b1, args.b2))
+    optimizer_AdvBE = torch.optim.Adam(ae.advbe.parameters(), lr=args.lr, betas=(args.b1, args.b2))
+    optimizer_trans = torch.optim.Adam(ae.learned_trans.parameters(), lr=args.lr, betas=(args.b1, args.b2))
   
   # Resume previous step
   previous_epoch = previous_step = 0
@@ -202,8 +227,8 @@ if __name__ == "__main__":
       prob_gt = F.softmax(x, dim=1) # prob, ground truth
       label = label.cuda()
       
-      if args.adv_train: # adversarial loss: Decoder should generate the images that can be "recognized" by the Encoder but "unrecognized" by the SE.
-        img_rec1 = ae.dec(x); img_rec1_DA = ae.transform(img_rec1)
+      if args.adv_train == 1: # adversarial loss: Decoder should generate the images that can be "recognized" by the Encoder but "unrecognized" by the SE.
+        img_rec1 = ae.dec(x); img_rec1_DA = ae.defined_trans(img_rec1)
         
         ## update AdvBE
         ae.advbe.zero_grad()
@@ -234,7 +259,7 @@ if __name__ == "__main__":
         Shardloss = nn.CrossEntropyLoss()(Slogits, label.data) * args.hardloss_weight
         Shardloss_DA = nn.CrossEntropyLoss()(Slogits_DA, label.data) * args.daloss_weight
         Spred = Slogits.detach().max(1)[1]; trainacc_SE = Spred.eq(label.view_as(Spred)).sum().cpu().data.numpy() / float(args.batch_size)
-        Spred_DA = Slogits_DA.detach().max(1)[1]; trainacc_SE_DA = Spred_DA.eq(label.view_as(Spred_DA)).sum().cpu().data.numpy() / float(args.batch_size)
+        Spred_DA = Slogits_DA.detach().max(1)[1]; trainacc_DA_SE = Spred_DA.eq(label.view_as(Spred_DA)).sum().cpu().data.numpy() / float(args.batch_size)
         
         # total variation loss and image norm loss, from "2015-CVPR-Understanding Deep Image Representations by Inverting Them"
         tvloss1 = args.tvloss_weight * (torch.sum(torch.abs(img_rec1[:, :, :, :-1] - img_rec1[:, :, :, 1:])) + 
@@ -245,10 +270,10 @@ if __name__ == "__main__":
         img_norm2 = torch.pow(torch.norm(img_rec2, p=6), 6) * args.normloss_weight
         
         # perceptual loss: train the big decoder
-        ploss1 = loss_func(feats2[0], feats1[0].data) * args.ploss_weight * ploss_lw[0]
-        ploss2 = loss_func(feats2[1], feats1[1].data) * args.ploss_weight * ploss_lw[1]
-        ploss3 = loss_func(feats2[2], feats1[2].data) * args.ploss_weight * ploss_lw[2]
-        ploss4 = loss_func(feats2[3], feats1[3].data) * args.ploss_weight * ploss_lw[3]
+        ploss1 = nn.MSELoss()(feats2[0], feats1[0].data) * args.ploss_weight * ploss_lw[0]
+        ploss2 = nn.MSELoss()(feats2[1], feats1[1].data) * args.ploss_weight * ploss_lw[1]
+        ploss3 = nn.MSELoss()(feats2[2], feats1[2].data) * args.ploss_weight * ploss_lw[2]
+        ploss4 = nn.MSELoss()(feats2[3], feats1[3].data) * args.ploss_weight * ploss_lw[3]
         
         # code reconstruction loss (KL Divergence)
         logprob1 = F.log_softmax(logits1/args.Temp, dim=1)
@@ -282,7 +307,8 @@ if __name__ == "__main__":
           for name, param in ae.small_enc.named_parameters():
             if param.requires_grad:
               param.data = ema_SE(name, param.data)
-      else:
+              
+      if args.adv_train == 0:
         # forward
         img_rec1, feats1, logits1_DA, Sfeats1, Slogits1_DA, img_rec2, feats2 = ae(x)
         
@@ -303,14 +329,14 @@ if __name__ == "__main__":
         Ssoftloss1 = nn.KLDivLoss()(Slogprob1, prob_gt.data) * (args.Temp*args.Temp) * args.softloss_weight
         
         # feature reconstruction loss: train the small encoder
-        floss3 = loss_func(Sfeats1[2], feats1[2].data) * args.floss_weight * floss_lw[2]
-        floss4 = loss_func(Sfeats1[3], feats1[3].data) * args.floss_weight * floss_lw[3]
+        floss3 = nn.MSELoss()(Sfeats1[2], feats1[2].data) * args.floss_weight * floss_lw[2]
+        floss4 = nn.MSELoss()(Sfeats1[3], feats1[3].data) * args.floss_weight * floss_lw[3]
         
         # perceptual loss: train the big decoder
-        ploss1 = loss_func(feats2[0], feats1[0].data) * args.ploss_weight * ploss_lw[0]
-        ploss2 = loss_func(feats2[1], feats1[1].data) * args.ploss_weight * ploss_lw[1]
-        ploss3 = loss_func(feats2[2], feats1[2].data) * args.ploss_weight * ploss_lw[2]
-        ploss4 = loss_func(feats2[3], feats1[3].data) * args.ploss_weight * ploss_lw[3]
+        ploss1 = nn.MSELoss()(feats2[0], feats1[0].data) * args.ploss_weight * ploss_lw[0]
+        ploss2 = nn.MSELoss()(feats2[1], feats1[1].data) * args.ploss_weight * ploss_lw[1]
+        ploss3 = nn.MSELoss()(feats2[2], feats1[2].data) * args.ploss_weight * ploss_lw[2]
+        ploss4 = nn.MSELoss()(feats2[3], feats1[3].data) * args.ploss_weight * ploss_lw[3]
         
         # hard target loss: train both 
         hardloss1  = nn.CrossEntropyLoss()( logits1, label.data) * args.hardloss_weight
@@ -343,7 +369,90 @@ if __name__ == "__main__":
         for name, param in ae.named_parameters():
           if param.requires_grad:
             param.data = ema(name, param.data)
+      
+      if args.adv_train == 2:
+        img_rec1 = ae.dec(x); img_rec1_definedDA = ae.defined_trans(img_rec1)
+        ## update BD
+        ae.dec.zero_grad()
+        feats1 = ae.enc.forward_branch(img_rec1); logits1 = feats1[-1]
+        feats2 = ae.enc.forward_branch(ae.dec(logits1))
+        logits1_definedDA = ae.enc(img_rec1_definedDA)
+        
+        # total variation loss and image norm loss, from "2015-CVPR-Understanding Deep Image Representations by Inverting Them"
+        tvloss1 = args.tvloss_weight * (torch.sum(torch.abs(img_rec1[:, :, :, :-1] - img_rec1[:, :, :, 1:])) + 
+                                        torch.sum(torch.abs(img_rec1[:, :, :-1, :] - img_rec1[:, :, 1:, :])))
+        img_norm1 = torch.pow(torch.norm(img_rec1, p=6), 6) * args.normloss_weight
+        
+        # perceptual loss: train the big decoder
+        ploss1 = nn.MSELoss()(feats2[0], feats1[0].data) * args.ploss_weight * ploss_lw[0]
+        ploss2 = nn.MSELoss()(feats2[1], feats1[1].data) * args.ploss_weight * ploss_lw[1]
+        ploss3 = nn.MSELoss()(feats2[2], feats1[2].data) * args.ploss_weight * ploss_lw[2]
+        ploss4 = nn.MSELoss()(feats2[3], feats1[3].data) * args.ploss_weight * ploss_lw[3]
+        
+        # soft loss (KL Divergence) and hard target loss
+        logprob1 = F.log_softmax(logits1/args.Temp, dim=1)
+        softloss1 = nn.KLDivLoss()(logprob1, prob_gt.data) * (args.Temp*args.Temp) * args.softloss_weight
+        hardloss1 = nn.CrossEntropyLoss()(logits1, label.data) * args.hardloss_weight
+        hardloss1_definedDA = nn.CrossEntropyLoss()(logits1_definedDA, label.data) * args.daloss_weight
+        pred_BE = logits1.detach().max(1)[1]; trainacc_BE = pred_BE.eq(label.view_as(pred_BE)).sum().cpu().data.numpy() / float(args.batch_size)
+        
+        # total loss
+        loss_BD = tvloss1 + img_norm1 + ploss1 + ploss2 + ploss3 + ploss4 + softloss1 + hardloss1 + hardloss1_definedDA
+        
+        loss_BD.backward()
+        optimizer_BD.step()
+        for name, param in ae.dec.named_parameters():
+          if param.requires_grad:
+            param.data = ema_BD(name, param.data)
+        
+        
+        ## update AdvBE
+        ae.advbe.zero_grad()
+        logits_AdvBE = ae.advbe(img_rec1.detach()); hardloss_AdvBE = nn.CrossEntropyLoss()(logits_AdvBE, label.data) * args.hardloss_weight
+        pred_AdvBE = logits_AdvBE.detach().max(1)[1]; trainacc_AdvBE = pred_AdvBE.eq(label.view_as(pred_AdvBE)).sum().cpu().data.numpy() / float(args.batch_size)
+        
+        loss_AdvBE = hardloss_AdvBE
+        loss_AdvBE.backward()
+        optimizer_AdvBE.step()
+        for name, param in ae.advbe.named_parameters():
+          if param.requires_grad:
+            param.data = ema_AdvBE(name, param.data)
             
+        
+        ## update learned transform
+        ae.learned_trans.zero_grad()
+        img_rec1_DA = ae.learned_trans(img_rec1.detach()); logits1_DA = ae.enc(img_rec1_DA); logits1_DA_AdvBE = ae.advbe(img_rec1_DA)
+        loss_trans_BE    = nn.CrossEntropyLoss()(logits1_DA,       label.data) * args.hardloss_weight
+        loss_trans_AdvBE = nn.CrossEntropyLoss()(logits1_DA_AdvBE, label.data) * args.hardloss_weight
+        loss_trans = loss_trans_BE - loss_trans_AdvBE * args.alpha
+        pred_DA_BE    = logits1_DA.detach().max(1)[1];       trainacc_DA_BE    = pred_DA_BE.eq(label.view_as(pred_DA_BE)).sum().cpu().data.numpy() / float(args.batch_size)
+        pred_DA_AdvBE = logits1_DA_AdvBE.detach().max(1)[1]; trainacc_DA_AdvBE = pred_DA_AdvBE.eq(label.view_as(pred_DA_AdvBE)).sum().cpu().data.numpy() / float(args.batch_size)
+        
+        loss_trans.backward()
+        optimizer_trans.step()
+        for name, param in ae.learned_trans.named_parameters():
+          if param.requires_grad:
+            param.data = ema_trans(name, param.data)
+        
+            
+        ## update SE
+        ae.small_enc.zero_grad()
+        Slogits = ae.small_enc(img_rec1.detach()); Slogits_DA = ae.small_enc(img_rec1_DA.detach())
+        Slogprob = F.log_softmax(Slogits/args.Temp, dim=1); prob_BE = F.softmax(logits1/args.Temp, dim=1)
+        Ssoftloss = nn.KLDivLoss()(Slogprob, prob_BE.data) * (args.Temp*args.Temp) * args.softloss_weight
+        Shardloss = nn.CrossEntropyLoss()(Slogits, label.data) * args.hardloss_weight
+        Shardloss_DA = nn.CrossEntropyLoss()(Slogits_DA, label.data) * 1
+        
+        Spred    = Slogits.detach().max(1)[1];    trainacc_SE    = Spred.eq(label.view_as(Spred)).sum().cpu().data.numpy() / float(args.batch_size)
+        Spred_DA = Slogits_DA.detach().max(1)[1]; trainacc_DA_SE = Spred_DA.eq(label.view_as(Spred_DA)).sum().cpu().data.numpy() / float(args.batch_size)
+        
+        loss_SE = Ssoftloss + Shardloss + Shardloss_DA
+        loss_SE.backward()
+        optimizer_SE.step()
+        for name, param in ae.small_enc.named_parameters():
+          if param.requires_grad:
+            param.data = ema_SE(name, param.data)
+       
       # Print and check the gradient
       if step % 2000 == 0:
         ave_grad = []
@@ -359,19 +468,31 @@ if __name__ == "__main__":
       
       # Print training loss
       if step % SHOW_INTERVAL == 0:
-        if args.adv_train:
+        if args.adv_train in [0, 1]:
           format_str = "E{}S{} | BE: {:.5f}({:.3f}) {:.5f}({:.3f}) | AdvBE: {:.5f}({:.3f}) | SE: {:.5f}({:.3f}) {:.5f}({:.3f}) | soft: {:.5f} {:.5f} tv: {:.5f} {:.5f} norm: {:.5f} {:.5f} p: {:.5f} {:.5f} {:.5f} {:.5f} ({:.3f}s/step)"
           logprint(format_str.format(epoch, step,
               
               hardloss1.data.cpu().numpy(), trainacc_BE, hardloss1_DA.data.cpu().numpy(), trainacc_BE_DA,
               hardloss_AdvBE.data.cpu().numpy(), trainacc_AdvBE,
-              Shardloss.data.cpu().numpy(), trainacc_SE, Shardloss_DA.data.cpu().numpy(), trainacc_SE_DA,
+              Shardloss.data.cpu().numpy(), trainacc_SE, Shardloss_DA.data.cpu().numpy(), trainacc_DA_SE,
               
               softloss1.data.cpu().numpy(), softloss2.data.cpu().numpy(),
               tvloss1.data.cpu().numpy(), tvloss2.data.cpu().numpy(),
               img_norm1.data.cpu().numpy(), img_norm2.data.cpu().numpy(),
               ploss1.data.cpu().numpy(), ploss2.data.cpu().numpy(), ploss3.data.cpu().numpy(), ploss4.data.cpu().numpy(),
               (time.time()-t1)/SHOW_INTERVAL), log)
+        
+        elif args.adv_train == 2:
+          format_str = "E{}S{} || BE: {:.5f}({:.3f}) | AdvBE: {:.5f}({:.3f}) || DA_BE: {:.5f}({:.3f}) | DA_AdvBE: {:.5f}({:.3f}) || SE: {:.5f}({:.3f}) {:.5f}({:.3f}) || soft: {:.5f} tv: {:.5f} norm: {:.5f} p: {:.5f} {:.5f} {:.5f} {:.5f} ({:.3f}s/step)"
+          logprint(format_str.format(epoch, step,
+              hardloss1.data.cpu().numpy(),        trainacc_BE,
+              hardloss_AdvBE.data.cpu().numpy(),   trainacc_AdvBE, # cls loss before the learned transform
+              loss_trans_BE.data.cpu().numpy(),    trainacc_DA_BE, # cls loss after the learned transform
+              loss_trans_AdvBE.data.cpu().numpy(), trainacc_DA_AdvBE, 
+              Shardloss.data.cpu().numpy(), trainacc_SE, Shardloss_DA.data.cpu().numpy(), trainacc_DA_SE, # cls loss for SE
+              softloss1.data.cpu().numpy(), tvloss1.data.cpu().numpy(), img_norm1.data.cpu().numpy(), ploss1.data.cpu().numpy(), ploss2.data.cpu().numpy(), ploss3.data.cpu().numpy(), ploss4.data.cpu().numpy(),
+              (time.time()-t1)/SHOW_INTERVAL), log)
+          
         else:
           if args.mode in ["BD", "BDSE"]:
             format_str = "E{}S{} loss: {:.3f} | soft: {:.5f} {:.5f} | tv: {:.5f} {:.5f} | norm: {:.5f} {:.5f} | hard: {:.5f}({:.4f}) {:.5f}({:.4f}) {:.5f} | p: {:.5f} {:.5f} {:.5f} {:.5f} ({:.3f}s/step)"
