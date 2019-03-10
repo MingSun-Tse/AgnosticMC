@@ -178,11 +178,10 @@ class LearnedTransform(nn.Module):
     super(LearnedTransform, self).__init__()
     self.fixed = fixed
     
-    self.conv1 = nn.Conv2d( 1, 16, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
-    self.conv2 = nn.Conv2d(16, 32, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
-    self.conv3 = nn.Conv2d(32, 32, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
-    self.conv4 = nn.Conv2d(32, 16, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
-    self.conv5 = nn.Conv2d(16,  1, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+    self.conv1 = nn.Conv2d(1, 3, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+    self.conv2 = nn.Conv2d(3, 9, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+    self.conv3 = nn.Conv2d(9, 3, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+    self.conv4 = nn.Conv2d(3, 1, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
     self.relu = nn.ReLU(inplace=True)
     
     if model:
@@ -191,12 +190,12 @@ class LearnedTransform(nn.Module):
       for param in self.parameters():
           param.requires_grad = False
       
-  def forward(self, y):
-    y = self.relu(self.conv1(y))
+  def forward(self, x):
+    y = self.relu(self.conv1(x))
     y = self.relu(self.conv2(y))
     y = self.relu(self.conv3(y))
     y = self.relu(self.conv4(y))
-    y = self.relu(self.conv5(y))
+    y = x + y
     return y
   
 # ---------------------------------------------------
@@ -580,6 +579,7 @@ class AutoEncoder_BDSE_GAN2(nn.Module):
 AutoEncoders = {
 "BD": AutoEncoder_BD,
 "SE": AutoEncoder_SE,
-"BDSE": AutoEncoder_BDSE_GAN2,
+"BDSE": AutoEncoder_BDSE_Trans,
+"BDSE_GAN": AutoEncoder_BDSE_GAN2,
 }
   

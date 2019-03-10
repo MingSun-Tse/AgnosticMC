@@ -74,7 +74,7 @@ if __name__ == "__main__":
   parser.add_argument('--adv_train', type=int, default=0)
   parser.add_argument('--alpha', type=float, default=0.5, help="the multiplier for discriminator loss")
   parser.add_argument('--G_update_interval', type=int, default=1)
-  parser.add_argument('--EMA', type=float, default=0.99, help="Exponential Moving Average") 
+  parser.add_argument('--EMA', type=float, default=0.9, help="Exponential Moving Average") 
   args = parser.parse_args()
   
   # Get path
@@ -374,15 +374,18 @@ if __name__ == "__main__":
         img_rec1 = ae.dec(x); img_rec1_definedDA = ae.defined_trans(img_rec1)
         ## update BD
         ae.dec.zero_grad()
-        feats1 = ae.enc.forward_branch(img_rec1); logits1 = feats1[-1]
-        feats2 = ae.enc.forward_branch(ae.dec(logits1))
+        feats1 = ae.enc.forward_branch(img_rec1); logits1 = feats1[-1]; img_rec2 = ae.dec(logits1)
+        feats2 = ae.enc.forward_branch(img_rec2); logits2 = feats2[-1]
         logits1_definedDA = ae.enc(img_rec1_definedDA)
         
         # total variation loss and image norm loss, from "2015-CVPR-Understanding Deep Image Representations by Inverting Them"
         tvloss1 = args.tvloss_weight * (torch.sum(torch.abs(img_rec1[:, :, :, :-1] - img_rec1[:, :, :, 1:])) + 
                                         torch.sum(torch.abs(img_rec1[:, :, :-1, :] - img_rec1[:, :, 1:, :])))
+        tvloss2 = args.tvloss_weight * (torch.sum(torch.abs(img_rec2[:, :, :, :-1] - img_rec2[:, :, :, 1:])) + 
+                                        torch.sum(torch.abs(img_rec2[:, :, :-1, :] - img_rec2[:, :, 1:, :])))
         img_norm1 = torch.pow(torch.norm(img_rec1, p=6), 6) * args.normloss_weight
-        
+        img_norm2 = torch.pow(torch.norm(img_rec2, p=6), 6) * args.normloss_weight
+
         # perceptual loss: train the big decoder
         ploss1 = nn.MSELoss()(feats2[0], feats1[0].data) * args.ploss_weight * ploss_lw[0]
         ploss2 = nn.MSELoss()(feats2[1], feats1[1].data) * args.ploss_weight * ploss_lw[1]
@@ -391,14 +394,19 @@ if __name__ == "__main__":
         
         # soft loss (KL Divergence) and hard target loss
         logprob1 = F.log_softmax(logits1/args.Temp, dim=1)
+        logprob2 = F.log_softmax(logits2/args.Temp, dim=1)
         softloss1 = nn.KLDivLoss()(logprob1, prob_gt.data) * (args.Temp*args.Temp) * args.softloss_weight
+        softloss2 = nn.KLDivLoss()(logprob2, prob_gt.data) * (args.Temp*args.Temp) * args.softloss_weight
         hardloss1 = nn.CrossEntropyLoss()(logits1, label.data) * args.hardloss_weight
+        hardloss2 = nn.CrossEntropyLoss()(logits2, label.data) * args.hardloss_weight
         hardloss1_definedDA = nn.CrossEntropyLoss()(logits1_definedDA, label.data) * args.daloss_weight
         pred_BE = logits1.detach().max(1)[1]; trainacc_BE = pred_BE.eq(label.view_as(pred_BE)).sum().cpu().data.numpy() / float(args.batch_size)
         
         # total loss
-        loss_BD = tvloss1 + img_norm1 + ploss1 + ploss2 + ploss3 + ploss4 + softloss1 + hardloss1 + hardloss1_definedDA
-        
+        loss_BD = tvloss1 + img_norm1 + tvloss2 + img_norm2 + \
+                  ploss1 + ploss2 + ploss3 + ploss4 + \
+                  softloss1 + hardloss1 + hardloss1_definedDA + softloss2 + hardloss2 \
+                  
         loss_BD.backward()
         optimizer_BD.step()
         for name, param in ae.dec.named_parameters():
@@ -418,13 +426,13 @@ if __name__ == "__main__":
           if param.requires_grad:
             param.data = ema_AdvBE(name, param.data)
             
-        
+
         ## update learned transform
         ae.learned_trans.zero_grad()
         img_rec1_DA = ae.learned_trans(img_rec1.detach()); logits1_DA = ae.enc(img_rec1_DA); logits1_DA_AdvBE = ae.advbe(img_rec1_DA)
         loss_trans_BE    = nn.CrossEntropyLoss()(logits1_DA,       label.data) * args.hardloss_weight
         loss_trans_AdvBE = nn.CrossEntropyLoss()(logits1_DA_AdvBE, label.data) * args.hardloss_weight
-        loss_trans = loss_trans_BE - loss_trans_AdvBE * args.alpha
+        loss_trans = loss_trans_BE / loss_trans_AdvBE * args.alpha
         pred_DA_BE    = logits1_DA.detach().max(1)[1];       trainacc_DA_BE    = pred_DA_BE.eq(label.view_as(pred_DA_BE)).sum().cpu().data.numpy() / float(args.batch_size)
         pred_DA_AdvBE = logits1_DA_AdvBE.detach().max(1)[1]; trainacc_DA_AdvBE = pred_DA_AdvBE.eq(label.view_as(pred_DA_AdvBE)).sum().cpu().data.numpy() / float(args.batch_size)
         
@@ -434,14 +442,14 @@ if __name__ == "__main__":
           if param.requires_grad:
             param.data = ema_trans(name, param.data)
         
-            
+        
         ## update SE
         ae.small_enc.zero_grad()
         Slogits = ae.small_enc(img_rec1.detach()); Slogits_DA = ae.small_enc(img_rec1_DA.detach())
         Slogprob = F.log_softmax(Slogits/args.Temp, dim=1); prob_BE = F.softmax(logits1/args.Temp, dim=1)
         Ssoftloss = nn.KLDivLoss()(Slogprob, prob_BE.data) * (args.Temp*args.Temp) * args.softloss_weight
         Shardloss = nn.CrossEntropyLoss()(Slogits, label.data) * args.hardloss_weight
-        Shardloss_DA = nn.CrossEntropyLoss()(Slogits_DA, label.data) * 1
+        Shardloss_DA = nn.CrossEntropyLoss()(Slogits_DA, label.data)
         
         Spred    = Slogits.detach().max(1)[1];    trainacc_SE    = Spred.eq(label.view_as(Spred)).sum().cpu().data.numpy() / float(args.batch_size)
         Spred_DA = Slogits_DA.detach().max(1)[1]; trainacc_DA_SE = Spred_DA.eq(label.view_as(Spred_DA)).sum().cpu().data.numpy() / float(args.batch_size)
@@ -452,6 +460,7 @@ if __name__ == "__main__":
         for name, param in ae.small_enc.named_parameters():
           if param.requires_grad:
             param.data = ema_SE(name, param.data)
+        
        
       # Print and check the gradient
       if step % 2000 == 0:
@@ -468,31 +477,32 @@ if __name__ == "__main__":
       
       # Print training loss
       if step % SHOW_INTERVAL == 0:
-        if args.adv_train in [0, 1]:
-          format_str = "E{}S{} | BE: {:.5f}({:.3f}) {:.5f}({:.3f}) | AdvBE: {:.5f}({:.3f}) | SE: {:.5f}({:.3f}) {:.5f}({:.3f}) | soft: {:.5f} {:.5f} tv: {:.5f} {:.5f} norm: {:.5f} {:.5f} p: {:.5f} {:.5f} {:.5f} {:.5f} ({:.3f}s/step)"
-          logprint(format_str.format(epoch, step,
-              
-              hardloss1.data.cpu().numpy(), trainacc_BE, hardloss1_DA.data.cpu().numpy(), trainacc_BE_DA,
-              hardloss_AdvBE.data.cpu().numpy(), trainacc_AdvBE,
-              Shardloss.data.cpu().numpy(), trainacc_SE, Shardloss_DA.data.cpu().numpy(), trainacc_DA_SE,
-              
-              softloss1.data.cpu().numpy(), softloss2.data.cpu().numpy(),
-              tvloss1.data.cpu().numpy(), tvloss2.data.cpu().numpy(),
-              img_norm1.data.cpu().numpy(), img_norm2.data.cpu().numpy(),
-              ploss1.data.cpu().numpy(), ploss2.data.cpu().numpy(), ploss3.data.cpu().numpy(), ploss4.data.cpu().numpy(),
-              (time.time()-t1)/SHOW_INTERVAL), log)
-        
-        elif args.adv_train == 2:
-          format_str = "E{}S{} || BE: {:.5f}({:.3f}) | AdvBE: {:.5f}({:.3f}) || DA_BE: {:.5f}({:.3f}) | DA_AdvBE: {:.5f}({:.3f}) || SE: {:.5f}({:.3f}) {:.5f}({:.3f}) || soft: {:.5f} tv: {:.5f} norm: {:.5f} p: {:.5f} {:.5f} {:.5f} {:.5f} ({:.3f}s/step)"
-          logprint(format_str.format(epoch, step,
-              hardloss1.data.cpu().numpy(),        trainacc_BE,
-              hardloss_AdvBE.data.cpu().numpy(),   trainacc_AdvBE, # cls loss before the learned transform
-              loss_trans_BE.data.cpu().numpy(),    trainacc_DA_BE, # cls loss after the learned transform
-              loss_trans_AdvBE.data.cpu().numpy(), trainacc_DA_AdvBE, 
-              Shardloss.data.cpu().numpy(), trainacc_SE, Shardloss_DA.data.cpu().numpy(), trainacc_DA_SE, # cls loss for SE
-              softloss1.data.cpu().numpy(), tvloss1.data.cpu().numpy(), img_norm1.data.cpu().numpy(), ploss1.data.cpu().numpy(), ploss2.data.cpu().numpy(), ploss3.data.cpu().numpy(), ploss4.data.cpu().numpy(),
-              (time.time()-t1)/SHOW_INTERVAL), log)
+        if args.adv_train:
+          if args.adv_train == 1:
+            format_str = "E{}S{} | BE: {:.5f}({:.3f}) {:.5f}({:.3f}) | AdvBE: {:.5f}({:.3f}) | SE: {:.5f}({:.3f}) {:.5f}({:.3f}) | soft: {:.5f} {:.5f} tv: {:.5f} {:.5f} norm: {:.5f} {:.5f} p: {:.5f} {:.5f} {:.5f} {:.5f} ({:.3f}s/step)"
+            logprint(format_str.format(epoch, step,
+                
+                hardloss1.data.cpu().numpy(), trainacc_BE, hardloss1_DA.data.cpu().numpy(), trainacc_BE_DA,
+                hardloss_AdvBE.data.cpu().numpy(), trainacc_AdvBE,
+                Shardloss.data.cpu().numpy(), trainacc_SE, Shardloss_DA.data.cpu().numpy(), trainacc_DA_SE,
+                
+                softloss1.data.cpu().numpy(), softloss2.data.cpu().numpy(),
+                tvloss1.data.cpu().numpy(), tvloss2.data.cpu().numpy(),
+                img_norm1.data.cpu().numpy(), img_norm2.data.cpu().numpy(),
+                ploss1.data.cpu().numpy(), ploss2.data.cpu().numpy(), ploss3.data.cpu().numpy(), ploss4.data.cpu().numpy(),
+                (time.time()-t1)/SHOW_INTERVAL), log)
           
+          elif args.adv_train == 2:
+            format_str = "E{}S{} | BE: {:.5f}({:.3f}) AdvBE: {:.5f}({:.3f}) | DA_BE: {:.5f}({:.3f}) DA_AdvBE: {:.5f}({:.3f}) | SE: {:.5f}({:.3f}) {:.5f}({:.3f}) | soft: {:.5f} tv: {:.5f} norm: {:.5f} p: {:.5f} {:.5f} {:.5f} {:.5f} ({:.3f}s/step)"
+            logprint(format_str.format(epoch, step,
+                hardloss1.data.cpu().numpy(),        trainacc_BE,
+                hardloss_AdvBE.data.cpu().numpy(),   trainacc_AdvBE, # cls loss before the learned transform
+                loss_trans_BE.data.cpu().numpy(),    trainacc_DA_BE, # cls loss after the learned transform
+                loss_trans_AdvBE.data.cpu().numpy(), trainacc_DA_AdvBE, 
+                Shardloss.data.cpu().numpy(), trainacc_SE, Shardloss_DA.data.cpu().numpy(), trainacc_DA_SE, # cls loss for SE
+                softloss1.data.cpu().numpy(), tvloss1.data.cpu().numpy(), img_norm1.data.cpu().numpy(), ploss1.data.cpu().numpy(), ploss2.data.cpu().numpy(), ploss3.data.cpu().numpy(), ploss4.data.cpu().numpy(),
+                (time.time()-t1)/SHOW_INTERVAL), log)
+            
         else:
           if args.mode in ["BD", "BDSE"]:
             format_str = "E{}S{} loss: {:.3f} | soft: {:.5f} {:.5f} | tv: {:.5f} {:.5f} | norm: {:.5f} {:.5f} | hard: {:.5f}({:.4f}) {:.5f}({:.4f}) {:.5f} | p: {:.5f} {:.5f} {:.5f} {:.5f} ({:.3f}s/step)"
@@ -502,6 +512,7 @@ if __name__ == "__main__":
                 hardloss1.data.cpu().numpy(), trainacc1, hardloss1_DA.data.cpu().numpy(), trainacc2, Shardloss1_DA.data.cpu().numpy(),
                 ploss1.data.cpu().numpy(), ploss2.data.cpu().numpy(), ploss3.data.cpu().numpy(), ploss4.data.cpu().numpy(),
                 (time.time()-t1)/SHOW_INTERVAL), log)
+          
           elif args.mode == "SE":
             format_str = "E{}S{} loss: {:.3f} | soft: {:.5f} {:.5f} | tv: {:.5f} {:.5f} | hard: {:.5f}({:.4f}) {:.5f}({:.4f}) | f: {:.5f} {:.5f} | p: {:.5f} {:.5f} {:.5f} {:.5f} ({:.3f}s/step)"
             logprint(format_str.format(epoch, step, loss.data.cpu().numpy(), softloss1.data.cpu().numpy(), softloss2.data.cpu().numpy(),
@@ -558,7 +569,7 @@ if __name__ == "__main__":
         Ssoftloss1_test /= cnt; Stest_acc /= float(len(data_test))
         test_acc /= float(len(data_test))
         
-        format_str = "E{}S{} | test softloss with real logits: BE: {:.5f}({:.3f}) SE: {:.5f}({:.3f}) | test accuracy on SE: {:.4f}"
+        format_str = "E{}S{} | =======> test softloss with real logits: BE: {:.5f}({:.3f}) SE: {:.5f}({:.3f}) | test accuracy on SE: {:.4f}"
         logprint(format_str.format(epoch, step, softloss1_test, test_acc1, Ssoftloss1_test, Stest_acc, test_acc), log)
         torch.save(ae.dec.state_dict(), pjoin(weights_path, "%s_BD_E%sS%s_testacc1=%.4f.pth" % (TIME_ID, epoch, step, test_acc1)))
         torch.save(ae.small_enc.state_dict(), pjoin(weights_path, "%s_SE_E%sS%s_testacc=%.4f.pth" % (TIME_ID, epoch, step, test_acc)))
