@@ -133,10 +133,10 @@ if __name__ == "__main__":
       if param.requires_grad:
         ema_AdvBE.register(name, param.data)
   elif args.adv_train == 2:
-    ema_BD = EMA(args.EMA)
-    ema_SE = EMA(args.EMA)
-    ema_AdvBE = EMA(args.EMA)
-    ema_trans = EMA(args.EMA)
+    ema_BD    = EMA(args.EMA)
+    ema_SE    = EMA(args.EMA)
+    ema_AdvBE = EMA(args.EMA); ema_AdvBE2 = EMA(args.EMA) 
+    ema_trans = EMA(args.EMA); ema_trans2 = EMA(args.EMA)
     for name, param in ae.dec.named_parameters():
       if param.requires_grad:
         ema_BD.register(name, param.data)
@@ -149,6 +149,12 @@ if __name__ == "__main__":
     for name, param in ae.learned_trans.named_parameters():
       if param.requires_grad:
         ema_trans.register(name, param.data)
+    for name, param in ae.advbe2.named_parameters():
+      if param.requires_grad:
+        ema_AdvBE2.register(name, param.data)
+    for name, param in ae.learned_trans2.named_parameters():
+      if param.requires_grad:
+        ema_trans2.register(name, param.data)
         
   # Prepare data
   data_train = datasets.MNIST('./MNIST_data',
@@ -199,7 +205,9 @@ if __name__ == "__main__":
     optimizer_BD    = torch.optim.Adam(ae.dec.parameters(), lr=args.lr, betas=(args.b1, args.b2))
     optimizer_AdvBE = torch.optim.Adam(ae.advbe.parameters(), lr=args.lr, betas=(args.b1, args.b2))
     optimizer_trans = torch.optim.Adam(ae.learned_trans.parameters(), lr=args.lr, betas=(args.b1, args.b2))
-  
+    optimizer_AdvBE2 = torch.optim.Adam(ae.advbe2.parameters(), lr=args.lr, betas=(args.b1, args.b2))
+    optimizer_trans2 = torch.optim.Adam(ae.learned_trans2.parameters(), lr=args.lr, betas=(args.b1, args.b2))
+    
   # Resume previous step
   previous_epoch = previous_step = 0
   if args.e2 and args.resume:
@@ -426,43 +434,63 @@ if __name__ == "__main__":
         for name, param in ae.advbe.named_parameters():
           if param.requires_grad:
             param.data = ema_AdvBE(name, param.data)
-            
+        
+        # AdvBE2
+        ae.advbe2.zero_grad()
+        logits_AdvBE2 = ae.advbe2(img_rec1.detach()); hardloss_AdvBE2 = nn.CrossEntropyLoss()(logits_AdvBE2, label.data) * args.hardloss_weight
+        loss_AdvBE2 = hardloss_AdvBE2
+        loss_AdvBE2.backward()
+        optimizer_AdvBE2.step()
+        for name, param in ae.advbe2.named_parameters():
+          if param.requires_grad:
+            param.data = ema_AdvBE2(name, param.data)
 
         ## update learned transform
         ae.learned_trans.zero_grad()
-        img_rec1_DA = ae.learned_trans(img_rec1.detach()); logits1_DA = ae.enc(img_rec1_DA); logits1_DA_AdvBE = ae.advbe(img_rec1_DA)
-        loss_trans_BE    = nn.CrossEntropyLoss()(logits1_DA,       label.data) * args.hardloss_weight
-        loss_trans_AdvBE = nn.CrossEntropyLoss()(logits1_DA_AdvBE, label.data) * args.hardloss_weight
-        loss_trans = loss_trans_BE / (loss_trans_AdvBE * args.alpha) + (loss_trans_BE - loss_trans_AdvBE) * (loss_trans_BE - loss_trans_AdvBE) * args.beta
+        img_rec1_DA  = ae.learned_trans(img_rec1.detach())
+        logits1_DA        = ae.enc(img_rec1_DA);    loss_trans_BE    = nn.CrossEntropyLoss()(logits1_DA,       label.data) * args.hardloss_weight
+        logits1_DA_AdvBE  = ae.advbe(img_rec1_DA);  loss_trans_AdvBE = nn.CrossEntropyLoss()(logits1_DA_AdvBE, label.data) * args.hardloss_weight
+        
+        img_rec1_DA2 = ae.learned_trans2(img_rec1.detach())
+        logits1_DA2       = ae.enc(img_rec1_DA2);    loss_trans_BE2    = nn.CrossEntropyLoss()(logits1_DA2,       label.data) * args.hardloss_weight
+        logits1_DA_AdvBE2 = ae.advbe2(img_rec1_DA2); loss_trans_AdvBE2 = nn.CrossEntropyLoss()(logits1_DA_AdvBE2, label.data) * args.hardloss_weight
+        
+        loss_trans  = loss_trans_BE  / (loss_trans_AdvBE  * args.alpha) + (loss_trans_BE  - loss_trans_AdvBE)  * (loss_trans_BE  - loss_trans_AdvBE)  * args.beta
+        loss_trans2 = loss_trans_BE2 / (loss_trans_AdvBE2 * args.alpha) + (loss_trans_BE2 - loss_trans_AdvBE2) * (loss_trans_BE2 - loss_trans_AdvBE2) * args.beta
+        
         pred_DA_BE    = logits1_DA.detach().max(1)[1];       trainacc_DA_BE    = pred_DA_BE.eq(label.view_as(pred_DA_BE)).sum().cpu().data.numpy() / float(args.batch_size)
         pred_DA_AdvBE = logits1_DA_AdvBE.detach().max(1)[1]; trainacc_DA_AdvBE = pred_DA_AdvBE.eq(label.view_as(pred_DA_AdvBE)).sum().cpu().data.numpy() / float(args.batch_size)
         
-        loss_trans.backward()
-        optimizer_trans.step()
+        loss_trans.backward();  optimizer_trans.step()
+        loss_trans2.backward(); optimizer_trans2.step()
         for name, param in ae.learned_trans.named_parameters():
           if param.requires_grad:
             param.data = ema_trans(name, param.data)
-        
+        for name, param in ae.learned_trans2.named_parameters():
+          if param.requires_grad:
+            param.data = ema_trans2(name, param.data)
         
         ## update SE
         ae.small_enc.zero_grad()
-        Slogits = ae.small_enc(img_rec1.detach()); Slogits_DA = ae.small_enc(img_rec1_DA.detach())
+        Slogits = ae.small_enc(img_rec1.detach())
         Slogprob = F.log_softmax(Slogits/args.Temp, dim=1); prob_BE = F.softmax(logits1/args.Temp, dim=1)
         Ssoftloss = nn.KLDivLoss()(Slogprob, prob_BE.data) * (args.Temp*args.Temp) * args.softloss_weight
         Shardloss = nn.CrossEntropyLoss()(Slogits, label.data) * args.hardloss_weight
-        Shardloss_DA = nn.CrossEntropyLoss()(Slogits_DA, label.data)
+        
+        Slogits_DA  = ae.small_enc(img_rec1_DA.detach());  Shardloss_DA  = nn.CrossEntropyLoss()(Slogits_DA,  label.data)
+        Slogits_DA2 = ae.small_enc(img_rec1_DA2.detach()); Shardloss_DA2 = nn.CrossEntropyLoss()(Slogits_DA2, label.data)
         
         Spred    = Slogits.detach().max(1)[1];    trainacc_SE    = Spred.eq(label.view_as(Spred)).sum().cpu().data.numpy() / float(args.batch_size)
         Spred_DA = Slogits_DA.detach().max(1)[1]; trainacc_DA_SE = Spred_DA.eq(label.view_as(Spred_DA)).sum().cpu().data.numpy() / float(args.batch_size)
         
-        loss_SE = Ssoftloss + Shardloss + Shardloss_DA
+        loss_SE = Ssoftloss + Shardloss + Shardloss_DA + Shardloss_DA2
         loss_SE.backward()
         optimizer_SE.step()
         for name, param in ae.small_enc.named_parameters():
           if param.requires_grad:
             param.data = ema_SE(name, param.data)
         
-       
+
       # Print and check the gradient
       if step % 2000 == 0:
         ave_grad = []

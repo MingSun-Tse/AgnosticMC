@@ -602,10 +602,11 @@ class AutoEncoder_BDSE_GAN2(nn.Module):
     super(AutoEncoder_BDSE_GAN2, self).__init__()
     self.enc = Encoder(e1, fixed=True).eval()
     self.dec = Decoder(d,  fixed=False)
-    self.advbe = AdvEncoder(None, fixed=False) # adversarial encoder
     self.small_enc = SmallEncoder(e2, fixed=False)
-    self.learned_trans = LearnedTransform(trans_model, fixed=False)
     self.defined_trans = Transform8()
+    
+    self.advbe  = AdvEncoder(None, fixed=False); self.learned_trans = LearnedTransform(trans_model, fixed=False)
+    self.advbe2 = AdvEncoder(None, fixed=False); self.learned_trans2 = LearnedTransform(trans_model, fixed=False)
     
     
 AutoEncoders = {
