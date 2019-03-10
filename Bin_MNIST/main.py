@@ -218,7 +218,7 @@ if __name__ == "__main__":
       # Generate codes randomly
       if args.use_pseudo_code:
         onehot_label = one_hot.sample_n(args.batch_size)
-        x = torch.randn([args.batch_size, args.num_class]) * 5.0 + onehot_label * np.random.randint(args.end, args.begin) # logits
+        x = torch.randn([args.batch_size, args.num_class]) * (np.random.rand() * 5.0 + 2.0) + onehot_label * np.random.randint(args.end, args.begin) # logits
         x = x.cuda() / args.Temp
         label = onehot_label.data.numpy().argmax(axis=1)
         label = torch.from_numpy(label).long()
