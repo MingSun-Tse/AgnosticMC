@@ -133,8 +133,8 @@ class DLeNet5_drop(nn.Module):
     super(DLeNet5_drop, self).__init__()
     self.fixed = fixed
     
-    self.fc5 = nn.Linear( 10,  84); self.drop5 = nn.Dropout(p=0.5)
-    self.fc4 = nn.Linear( 84, 120); self.drop4 = nn.Dropout(p=0.5)
+    self.fc5 = nn.Linear( 10,  84); self.drop5 = nn.Dropout(p=0.1)
+    self.fc4 = nn.Linear( 84, 120); self.drop4 = nn.Dropout(p=0.1)
     self.fc3 = nn.Linear(120, 400)
     self.conv2 = nn.Conv2d(16, 6, kernel_size=(5, 5), stride=(1, 1), padding=(2, 2)) # to maintain the spatial size, so padding=2
     self.conv1 = nn.Conv2d( 6, 1, kernel_size=(5, 5), stride=(1, 1), padding=(2, 2))
@@ -228,7 +228,7 @@ class LearnedTransform(nn.Module):
     y = self.relu(self.conv4(y))
     y = x + y
     return y
-  
+    
 # ---------------------------------------------------
 class Transform1(nn.Module):
   def __init__(self):

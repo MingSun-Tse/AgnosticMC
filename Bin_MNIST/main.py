@@ -72,7 +72,8 @@ if __name__ == "__main__":
   parser.add_argument('--end',   type=float, default=20)
   parser.add_argument('--Temp',  type=float, default=1, help="the Tempature in KD")
   parser.add_argument('--adv_train', type=int, default=0)
-  parser.add_argument('--alpha', type=float, default=0.5, help="the multiplier for discriminator loss")
+  parser.add_argument('--alpha', type=float, default=1, help="a factor to balance the GAN-style loss")
+  parser.add_argument('--beta', type=float, default=1e-6, help="a factor to balance the GAN-style loss")
   parser.add_argument('--G_update_interval', type=int, default=1)
   parser.add_argument('--EMA', type=float, default=0.9, help="Exponential Moving Average") 
   args = parser.parse_args()
@@ -432,7 +433,7 @@ if __name__ == "__main__":
         img_rec1_DA = ae.learned_trans(img_rec1.detach()); logits1_DA = ae.enc(img_rec1_DA); logits1_DA_AdvBE = ae.advbe(img_rec1_DA)
         loss_trans_BE    = nn.CrossEntropyLoss()(logits1_DA,       label.data) * args.hardloss_weight
         loss_trans_AdvBE = nn.CrossEntropyLoss()(logits1_DA_AdvBE, label.data) * args.hardloss_weight
-        loss_trans = loss_trans_BE / loss_trans_AdvBE * args.alpha
+        loss_trans = loss_trans_BE / (loss_trans_AdvBE * args.alpha) + (loss_trans_BE - loss_trans_AdvBE) * (loss_trans_BE - loss_trans_AdvBE) * args.beta
         pred_DA_BE    = logits1_DA.detach().max(1)[1];       trainacc_DA_BE    = pred_DA_BE.eq(label.view_as(pred_DA_BE)).sum().cpu().data.numpy() / float(args.batch_size)
         pred_DA_AdvBE = logits1_DA_AdvBE.detach().max(1)[1]; trainacc_DA_AdvBE = pred_DA_AdvBE.eq(label.view_as(pred_DA_AdvBE)).sum().cpu().data.numpy() / float(args.batch_size)
         
@@ -569,9 +570,15 @@ if __name__ == "__main__":
         Ssoftloss1_test /= cnt; Stest_acc /= float(len(data_test))
         test_acc /= float(len(data_test))
         
-        format_str = "E{}S{} | =======> test softloss with real logits: BE: {:.5f}({:.3f}) SE: {:.5f}({:.3f}) | test accuracy on SE: {:.4f}"
+        format_str = "E{}S{} | =======> Test softloss with real logits: BE: {:.5f}({:.3f}) SE: {:.5f}({:.3f}) | test accuracy on SE: {:.4f}"
         logprint(format_str.format(epoch, step, softloss1_test, test_acc1, Ssoftloss1_test, Stest_acc, test_acc), log)
-        torch.save(ae.dec.state_dict(), pjoin(weights_path, "%s_BD_E%sS%s_testacc1=%.4f.pth" % (TIME_ID, epoch, step, test_acc1)))
-        torch.save(ae.small_enc.state_dict(), pjoin(weights_path, "%s_SE_E%sS%s_testacc=%.4f.pth" % (TIME_ID, epoch, step, test_acc)))
+        if args.adv_train == 0:
+          torch.save(ae.dec.state_dict(), pjoin(weights_path, "%s_BD_E%sS%s_testacc1=%.4f.pth" % (TIME_ID, epoch, step, test_acc1)))
+          torch.save(ae.small_enc.state_dict(), pjoin(weights_path, "%s_SE_E%sS%s_testacc=%.4f.pth" % (TIME_ID, epoch, step, test_acc)))
+        elif args.adv_train == 2:
+          torch.save(ae.dec.state_dict(), pjoin(weights_path, "%s_BD_E%sS%s_testacc1=%.4f.pth" % (TIME_ID, epoch, step, test_acc1)))
+          torch.save(ae.small_enc.state_dict(), pjoin(weights_path, "%s_SE_E%sS%s_testacc=%.4f.pth" % (TIME_ID, epoch, step, test_acc)))
+          torch.save(ae.learned_trans.state_dict(), pjoin(weights_path, "%s_LT_E%sS%s.pth" % (TIME_ID, epoch, step)))
+          torch.save(ae.advbe.state_dict(), pjoin(weights_path, "%s_AdvBE_E%sS%s.pth" % (TIME_ID, epoch, step)))
   
   log.close()
