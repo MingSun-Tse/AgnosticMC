@@ -63,6 +63,37 @@ class LeNet5(nn.Module):
     y = self.fc5(y)
     return out1, out2, out3, out4, y
     
+
+class LeNet5_drop(nn.Module):
+  def __init__(self, model=None, fixed=False):
+    super(LeNet5_drop, self).__init__()
+    self.fixed = fixed
+    
+    self.conv1 = nn.Conv2d( 1,  6, kernel_size=(5, 5), stride=(1, 1), padding=(0, 0)); self.pool1 = nn.MaxPool2d(kernel_size=2, stride=2, padding=0)
+    self.conv2 = nn.Conv2d( 6, 16, kernel_size=(5, 5), stride=(1, 1), padding=(0, 0)); self.pool2 = nn.MaxPool2d(kernel_size=2, stride=2, padding=0)
+    self.fc3 = nn.Linear(400, 120); self.drop3 = nn.Dropout(p=0.5)
+    self.fc4 = nn.Linear(120,  84); self.drop4 = nn.Dropout(p=0.5)
+    self.fc5 = nn.Linear( 84,  10)
+    self.relu = nn.ReLU(inplace=True)
+    
+    if model:
+      self.load_state_dict(torch.load(model))
+    if fixed:
+      for param in self.parameters():
+          param.requires_grad = False
+      
+  def forward(self, y):          # input: 1x32x32
+    y = self.relu(self.conv1(y)) # 6x28x28
+    y = self.pool1(y)            # 6x14x14
+    y = self.relu(self.conv2(y)) # 16x10x10
+    y = self.pool2(y)            # 16x5x5
+    y = y.view(y.size(0), -1)    # 400
+    y = self.relu(self.drop3(self.fc3(y)))   # 120
+    y = self.relu(self.drop4(self.fc4(y)))   # 84
+    y = self.fc5(y)              # 10
+    return y
+  
+
 class DLeNet5(nn.Module):
   def __init__(self, model=None, fixed=False):
     super(DLeNet5, self).__init__()
@@ -472,6 +503,7 @@ class Transform8(nn.Module): # random transform combination
 Encoder = LeNet5
 Decoder = DLeNet5
 SmallEncoder = SmallLeNet5
+AdvEncoder = LeNet5_drop
 
 class AutoEncoder_BD(nn.Module):
   def __init__(self, e1=None, d=None, e2=None):
@@ -570,10 +602,10 @@ class AutoEncoder_BDSE_GAN2(nn.Module):
     super(AutoEncoder_BDSE_GAN2, self).__init__()
     self.enc = Encoder(e1, fixed=True).eval()
     self.dec = Decoder(d,  fixed=False)
-    self.advbe = Encoder(None, fixed=False) # adversarial encoder
+    self.advbe = AdvEncoder(None, fixed=False) # adversarial encoder
     self.small_enc = SmallEncoder(e2, fixed=False)
     self.learned_trans = LearnedTransform(trans_model, fixed=False)
-    self.defined_trans = Transform3()
+    self.defined_trans = Transform8()
     
     
 AutoEncoders = {
