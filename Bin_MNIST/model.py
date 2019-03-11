@@ -62,7 +62,6 @@ class LeNet5(nn.Module):
     y = self.relu(self.fc4(y)); out4 = y
     y = self.fc5(y)
     return out1, out2, out3, out4, y
-    
 
 class LeNet5_drop(nn.Module):
   def __init__(self, model=None, fixed=False):
@@ -93,7 +92,6 @@ class LeNet5_drop(nn.Module):
     y = self.fc5(y)              # 10
     return y
   
-
 class DLeNet5(nn.Module):
   def __init__(self, model=None, fixed=False):
     super(DLeNet5, self).__init__()
@@ -209,10 +207,22 @@ class LearnedTransform(nn.Module):
     super(LearnedTransform, self).__init__()
     self.fixed = fixed
     
-    self.conv1 = nn.Conv2d(1, 3, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
-    self.conv2 = nn.Conv2d(3, 9, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
-    self.conv3 = nn.Conv2d(9, 3, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
-    self.conv4 = nn.Conv2d(3, 1, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+    self.conv11 = nn.Conv2d(1, 8, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+    self.conv12 = nn.Conv2d(8, 8, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+    self.conv13 = nn.Conv2d(8, 1, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+    
+    self.conv21 = nn.Conv2d(1, 8, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+    self.conv22 = nn.Conv2d(8, 8, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+    self.conv23 = nn.Conv2d(8, 1, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+    
+    self.conv31 = nn.Conv2d(1, 8, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+    self.conv32 = nn.Conv2d(8, 8, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+    self.conv33 = nn.Conv2d(8, 1, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+    
+    self.conv31 = nn.Conv2d(1, 8, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+    self.conv32 = nn.Conv2d(8, 8, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+    self.conv33 = nn.Conv2d(8, 1, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+    
     self.relu = nn.ReLU(inplace=True)
     
     if model:
@@ -222,12 +232,16 @@ class LearnedTransform(nn.Module):
           param.requires_grad = False
       
   def forward(self, x):
-    y = self.relu(self.conv1(x))
-    y = self.relu(self.conv2(y))
-    y = self.relu(self.conv3(y))
-    y = self.relu(self.conv4(y))
-    y = x + y
-    return y
+    y = self.relu(self.conv11(x))
+    y = self.relu(self.conv12(y))
+    x = self.relu(self.conv13(y)) + x
+    y = self.relu(self.conv21(x))
+    y = self.relu(self.conv22(y))
+    x = self.relu(self.conv23(y)) + x
+    y = self.relu(self.conv31(x))
+    y = self.relu(self.conv32(y))
+    x = self.relu(self.conv33(y))
+    return x
     
 # ---------------------------------------------------
 class Transform1(nn.Module):
@@ -460,10 +474,10 @@ class Transform10(nn.Module): # smooth
   def forward(self, x):
     return self.conv1(x)
     
-class Transform11(nn.Module):
+class Transform11(nn.Module): # Gaussian smoothing
   def __init__(self):
     super(Transform11, self).__init__()
-    kernel = [[[[1, 2, 1], [2, 4, 1], [1, 2, 1]]]] # Gaussian smoothing
+    kernel = [[[[1, 2, 1], [2, 4, 1], [1, 2, 1]]]] 
     kernel = torch.from_numpy(np.array(kernel)).float() * 0.0625
     self.conv1 = nn.Conv2d(1, 1, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1), bias=False)
     self.conv1.weight = nn.Parameter(kernel)
@@ -471,7 +485,6 @@ class Transform11(nn.Module):
   
   def forward(self, x):
     return self.conv1(x)
-  
     
 class Transform8(nn.Module): # random transform combination
   def __init__(self):
@@ -501,7 +514,7 @@ class Transform8(nn.Module): # random transform combination
 # ---------------------------------------------------
 # AutoEncoder part
 Encoder = LeNet5
-Decoder = DLeNet5_drop
+Decoder = DLeNet5
 SmallEncoder = SmallLeNet5
 AdvEncoder = LeNet5_drop
 

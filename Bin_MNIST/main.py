@@ -43,7 +43,7 @@ if __name__ == "__main__":
   parser.add_argument('--d',   type=str,   default=None)# "../Ex*/*81/w*/*BD*E76S0*.pth")  # "../Ex*/test/w*/*1559_BD_E508S0*.pth"
   parser.add_argument('--t',   type=str,   default=None)
   parser.add_argument('--gpu', type=int,   default=0)
-  parser.add_argument('--lr',  type=float, default=5e-4)
+  parser.add_argument('--lr',  type=float, default=1e-3)
   parser.add_argument('--b1',  type=float, default=5e-4, help='adam: decay of first order momentum of gradient')
   parser.add_argument('--b2',  type=float, default=5e-4, help='adam: decay of second order momentum of gradient')
   # ----------------------------------------------------------------
@@ -88,7 +88,8 @@ if __name__ == "__main__":
   assert(args.mode in AutoEncoders.keys())
   
   # Set up directories and logs, etc.
-  project_path = pjoin("../Experiments", args.project_name)
+  TIME_ID = time.strftime("%Y%m%d-%H%M")
+  project_path = pjoin("../Experiments", TIME_ID + "_" + args.project_name)
   rec_img_path = pjoin(project_path, "reconstructed_images")
   weights_path = pjoin(project_path, "weights") # to save torch model
   if not os.path.exists(project_path):
@@ -101,7 +102,7 @@ if __name__ == "__main__":
     os.makedirs(rec_img_path)
   if not os.path.exists(weights_path):
     os.makedirs(weights_path)
-  TIME_ID = "SERVER" + os.environ["SERVER"] + time.strftime("-%Y%m%d-%H%M")
+  TIME_ID = "SERVER" + os.environ["SERVER"] + "-" + TIME_ID
   log_path = pjoin(weights_path, "log_" + TIME_ID + ".txt")
   log = sys.stdout if args.debug else open(log_path, "w+")
   
@@ -428,22 +429,25 @@ if __name__ == "__main__":
         logits_AdvBE = ae.advbe(img_rec1.detach()); hardloss_AdvBE = nn.CrossEntropyLoss()(logits_AdvBE, label.data) * args.hardloss_weight
         pred_AdvBE = logits_AdvBE.detach().max(1)[1]; trainacc_AdvBE = pred_AdvBE.eq(label.view_as(pred_AdvBE)).sum().cpu().data.numpy() / float(args.batch_size)
         
-        loss_AdvBE = hardloss_AdvBE
+        # img_rec1_DA = ae.learned_trans(img_rec1.detach())
+        # logits_DA_AdvBE = ae.advbe(img_rec1_DA.detach()); hardloss_DA_AdvBE = nn.CrossEntropyLoss()(logits_DA_AdvBE, label.data) * args.hardloss_weight
+        
+        loss_AdvBE = hardloss_AdvBE # + 0.1 * hardloss_DA_AdvBE
         loss_AdvBE.backward()
         optimizer_AdvBE.step()
         for name, param in ae.advbe.named_parameters():
           if param.requires_grad:
             param.data = ema_AdvBE(name, param.data)
         
-        # AdvBE2
-        ae.advbe2.zero_grad()
-        logits_AdvBE2 = ae.advbe2(img_rec1.detach()); hardloss_AdvBE2 = nn.CrossEntropyLoss()(logits_AdvBE2, label.data) * args.hardloss_weight
-        loss_AdvBE2 = hardloss_AdvBE2
-        loss_AdvBE2.backward()
-        optimizer_AdvBE2.step()
-        for name, param in ae.advbe2.named_parameters():
-          if param.requires_grad:
-            param.data = ema_AdvBE2(name, param.data)
+        # # AdvBE2
+        # ae.advbe2.zero_grad()
+        # logits_AdvBE2 = ae.advbe2(img_rec1.detach()); hardloss_AdvBE2 = nn.CrossEntropyLoss()(logits_AdvBE2, label.data) * args.hardloss_weight
+        # loss_AdvBE2 = hardloss_AdvBE2
+        # loss_AdvBE2.backward()
+        # optimizer_AdvBE2.step()
+        # for name, param in ae.advbe2.named_parameters():
+          # if param.requires_grad:
+            # param.data = ema_AdvBE2(name, param.data)
 
         ## update learned transform
         ae.learned_trans.zero_grad()
@@ -451,24 +455,25 @@ if __name__ == "__main__":
         logits1_DA        = ae.enc(img_rec1_DA);    loss_trans_BE    = nn.CrossEntropyLoss()(logits1_DA,       label.data) * args.hardloss_weight
         logits1_DA_AdvBE  = ae.advbe(img_rec1_DA);  loss_trans_AdvBE = nn.CrossEntropyLoss()(logits1_DA_AdvBE, label.data) * args.hardloss_weight
         
-        img_rec1_DA2 = ae.learned_trans2(img_rec1.detach())
-        logits1_DA2       = ae.enc(img_rec1_DA2);    loss_trans_BE2    = nn.CrossEntropyLoss()(logits1_DA2,       label.data) * args.hardloss_weight
-        logits1_DA_AdvBE2 = ae.advbe2(img_rec1_DA2); loss_trans_AdvBE2 = nn.CrossEntropyLoss()(logits1_DA_AdvBE2, label.data) * args.hardloss_weight
+        # # LT2
+        # img_rec1_DA2 = ae.learned_trans2(img_rec1.detach())
+        # logits1_DA2       = ae.enc(img_rec1_DA2);    loss_trans_BE2    = nn.CrossEntropyLoss()(logits1_DA2,       label.data) * args.hardloss_weight
+        # logits1_DA_AdvBE2 = ae.advbe2(img_rec1_DA2); loss_trans_AdvBE2 = nn.CrossEntropyLoss()(logits1_DA_AdvBE2, label.data) * args.hardloss_weight
         
-        loss_trans  = loss_trans_BE  / (loss_trans_AdvBE  * args.alpha) + (loss_trans_BE  - loss_trans_AdvBE)  * (loss_trans_BE  - loss_trans_AdvBE)  * args.beta
-        loss_trans2 = loss_trans_BE2 / (loss_trans_AdvBE2 * args.alpha) + (loss_trans_BE2 - loss_trans_AdvBE2) * (loss_trans_BE2 - loss_trans_AdvBE2) * args.beta
+        loss_trans  = loss_trans_BE  / (loss_trans_AdvBE  * args.alpha) # + (loss_trans_BE  - loss_trans_AdvBE)  * (loss_trans_BE  - loss_trans_AdvBE)  * args.beta
+        # loss_trans2 = loss_trans_BE2 / (loss_trans_AdvBE2 * args.alpha) + (loss_trans_BE2 - loss_trans_AdvBE2) * (loss_trans_BE2 - loss_trans_AdvBE2) * args.beta
         
         pred_DA_BE    = logits1_DA.detach().max(1)[1];       trainacc_DA_BE    = pred_DA_BE.eq(label.view_as(pred_DA_BE)).sum().cpu().data.numpy() / float(args.batch_size)
         pred_DA_AdvBE = logits1_DA_AdvBE.detach().max(1)[1]; trainacc_DA_AdvBE = pred_DA_AdvBE.eq(label.view_as(pred_DA_AdvBE)).sum().cpu().data.numpy() / float(args.batch_size)
         
         loss_trans.backward();  optimizer_trans.step()
-        loss_trans2.backward(); optimizer_trans2.step()
+        # loss_trans2.backward(); optimizer_trans2.step()
         for name, param in ae.learned_trans.named_parameters():
           if param.requires_grad:
             param.data = ema_trans(name, param.data)
-        for name, param in ae.learned_trans2.named_parameters():
-          if param.requires_grad:
-            param.data = ema_trans2(name, param.data)
+        # for name, param in ae.learned_trans2.named_parameters():
+          # if param.requires_grad:
+            # param.data = ema_trans2(name, param.data)
         
         ## update SE
         ae.small_enc.zero_grad()
@@ -478,12 +483,12 @@ if __name__ == "__main__":
         Shardloss = nn.CrossEntropyLoss()(Slogits, label.data) * args.hardloss_weight
         
         Slogits_DA  = ae.small_enc(img_rec1_DA.detach());  Shardloss_DA  = nn.CrossEntropyLoss()(Slogits_DA,  label.data)
-        Slogits_DA2 = ae.small_enc(img_rec1_DA2.detach()); Shardloss_DA2 = nn.CrossEntropyLoss()(Slogits_DA2, label.data)
+        # Slogits_DA2 = ae.small_enc(img_rec1_DA2.detach()); Shardloss_DA2 = nn.CrossEntropyLoss()(Slogits_DA2, label.data)
         
         Spred    = Slogits.detach().max(1)[1];    trainacc_SE    = Spred.eq(label.view_as(Spred)).sum().cpu().data.numpy() / float(args.batch_size)
         Spred_DA = Slogits_DA.detach().max(1)[1]; trainacc_DA_SE = Spred_DA.eq(label.view_as(Spred_DA)).sum().cpu().data.numpy() / float(args.batch_size)
         
-        loss_SE = Ssoftloss + Shardloss + Shardloss_DA + Shardloss_DA2
+        loss_SE = Ssoftloss + Shardloss + Shardloss_DA #+ Shardloss_DA2
         loss_SE.backward()
         optimizer_SE.step()
         for name, param in ae.small_enc.named_parameters():
