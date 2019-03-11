@@ -423,7 +423,6 @@ if __name__ == "__main__":
           if param.requires_grad:
             param.data = ema_BD(name, param.data)
         
-        
         ## update AdvBE
         ae.advbe.zero_grad()
         logits_AdvBE = ae.advbe(img_rec1.detach()); hardloss_AdvBE = nn.CrossEntropyLoss()(logits_AdvBE, label.data) * args.hardloss_weight
@@ -451,16 +450,20 @@ if __name__ == "__main__":
 
         ## update learned transform
         ae.learned_trans.zero_grad()
-        img_rec1_DA  = ae.learned_trans(img_rec1.detach())
+        img_rec1_DA = ae.learned_trans(img_rec1.detach())
         logits1_DA        = ae.enc(img_rec1_DA);    loss_trans_BE    = nn.CrossEntropyLoss()(logits1_DA,       label.data) * args.hardloss_weight
         logits1_DA_AdvBE  = ae.advbe(img_rec1_DA);  loss_trans_AdvBE = nn.CrossEntropyLoss()(logits1_DA_AdvBE, label.data) * args.hardloss_weight
+        # DA img loss
+        tvloss1_DA = args.tvloss_weight * (torch.sum(torch.abs(img_rec1_DA[:, :, :, :-1] - img_rec1_DA[:, :, :, 1:])) + 
+                                           torch.sum(torch.abs(img_rec1_DA[:, :, :-1, :] - img_rec1_DA[:, :, 1:, :]))) * 0.1
+        img_norm1_DA = torch.pow(torch.norm(img_rec1_DA, p=6), 6) * args.normloss_weight * 0.1
         
         # # LT2
         # img_rec1_DA2 = ae.learned_trans2(img_rec1.detach())
         # logits1_DA2       = ae.enc(img_rec1_DA2);    loss_trans_BE2    = nn.CrossEntropyLoss()(logits1_DA2,       label.data) * args.hardloss_weight
         # logits1_DA_AdvBE2 = ae.advbe2(img_rec1_DA2); loss_trans_AdvBE2 = nn.CrossEntropyLoss()(logits1_DA_AdvBE2, label.data) * args.hardloss_weight
         
-        loss_trans  = loss_trans_BE  / (loss_trans_AdvBE  * args.alpha) # + (loss_trans_BE  - loss_trans_AdvBE)  * (loss_trans_BE  - loss_trans_AdvBE)  * args.beta
+        loss_trans  = loss_trans_BE  / (loss_trans_AdvBE  * args.alpha) + tvloss1_DA + img_norm1_DA # + (loss_trans_BE  - loss_trans_AdvBE)  * (loss_trans_BE  - loss_trans_AdvBE)  * args.beta
         # loss_trans2 = loss_trans_BE2 / (loss_trans_AdvBE2 * args.alpha) + (loss_trans_BE2 - loss_trans_AdvBE2) * (loss_trans_BE2 - loss_trans_AdvBE2) * args.beta
         
         pred_DA_BE    = logits1_DA.detach().max(1)[1];       trainacc_DA_BE    = pred_DA_BE.eq(label.view_as(pred_DA_BE)).sum().cpu().data.numpy() / float(args.batch_size)
@@ -564,15 +567,15 @@ if __name__ == "__main__":
         for i in range(len(test_codes)):
           x = test_codes[i].cuda()
           img1 = ae.dec(x)
-          img2 = ae.dec(ae.enc(img1))
-          out_img1_path = pjoin(rec_img_path, "%s_E%sS%s_img%s-rec1_label=%s.jpg" % (TIME_ID, epoch, step, i, test_labels[i]))
-          out_img2_path = pjoin(rec_img_path, "%s_E%sS%s_img%s-rec2_label=%s.jpg" % (TIME_ID, epoch, step, i, test_labels[i]))
+          img1_DA = ae.learned_trans(img1)
+          out_img1_path = pjoin(rec_img_path, "%s_E%sS%s_img%s-rec_label=%s.jpg" % (TIME_ID, epoch, step, i, test_labels[i]))
+          out_img1_DA_path = pjoin(rec_img_path, "%s_E%sS%s_img%s-rec_DA_label=%s.jpg" % (TIME_ID, epoch, step, i, test_labels[i]))
           vutils.save_image(img1.data.cpu().float(), out_img1_path) # save some samples to check
-          vutils.save_image(img2.data.cpu().float(), out_img2_path) # save some samples to check
+          vutils.save_image(img1_DA.data.cpu().float(), out_img1_DA_path) # save some samples to check
         
         # test with the real codes generated from test set
-        test_loader = torch.utils.data.DataLoader(data_test,  batch_size=64, shuffle=True, **kwargs)
-        softloss1_test  = Ssoftloss1_test = test_acc1 = Stest_acc = test_acc = cnt = 0
+        test_loader = torch.utils.data.DataLoader(data_test,  batch_size=100, shuffle=False, **kwargs)
+        softloss1_test = Ssoftloss1_test = test_acc1 = Stest_acc = test_acc = test_acc_advbe = cnt = 0
         for i, (img, label) in enumerate(test_loader):
           x = ae.enc(img.cuda())
           label = label.cuda()
@@ -598,13 +601,16 @@ if __name__ == "__main__":
           # test acc for small enc
           pred = ae.small_enc(img.cuda()).detach().max(1)[1]
           test_acc += pred.eq(label.view_as(pred)).sum().cpu().data.numpy()
+          pred_advbe = ae.advbe(img.cuda()).detach().max(1)[1]
+          test_acc_advbe += pred_advbe.eq(label.view_as(pred_advbe)).sum().cpu().data.numpy()
         
         softloss1_test  /= cnt; test_acc1 /= float(len(data_test))
         Ssoftloss1_test /= cnt; Stest_acc /= float(len(data_test))
         test_acc /= float(len(data_test))
+        test_acc_advbe /= float(len(data_test))
         
-        format_str = "E{}S{} | =======> Test softloss with real logits: BE: {:.5f}({:.3f}) SE: {:.5f}({:.3f}) | test accuracy on SE: {:.4f}"
-        logprint(format_str.format(epoch, step, softloss1_test, test_acc1, Ssoftloss1_test, Stest_acc, test_acc), log)
+        format_str = "E{}S{} | =======> Test softloss with real logits: BE: {:.5f}({:.3f}) SE: {:.5f}({:.3f}) | test accuracy on SE: {:.4f} | test accuracy on AdvBE: {:.4f}"
+        logprint(format_str.format(epoch, step, softloss1_test, test_acc1, Ssoftloss1_test, Stest_acc, test_acc, test_acc_advbe), log)
         if args.adv_train == 0:
           torch.save(ae.dec.state_dict(), pjoin(weights_path, "%s_BD_E%sS%s_testacc1=%.4f.pth" % (TIME_ID, epoch, step, test_acc1)))
           torch.save(ae.small_enc.state_dict(), pjoin(weights_path, "%s_SE_E%sS%s_testacc=%.4f.pth" % (TIME_ID, epoch, step, test_acc)))
