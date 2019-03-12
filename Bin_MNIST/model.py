@@ -668,6 +668,8 @@ class AutoEncoder_BDSE_GAN3(nn.Module):
     self.d5 = Decoder(d[4], fixed=False)
     self.d6 = Decoder(d[5], fixed=False)
     self.d7 = Decoder(d[6], fixed=False)
+    self.d8 = Decoder(d[7], fixed=False)
+    self.d9 = Decoder(d[8], fixed=False)
     self.se = SmallEncoder(e2, fixed=False)
     self.defined_trans = Transform8()
     
