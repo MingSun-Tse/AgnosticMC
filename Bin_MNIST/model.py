@@ -666,9 +666,10 @@ class AutoEncoder_BDSE_GAN3(nn.Module):
     self.d3 = Decoder(d[2], fixed=False)
     self.d4 = Decoder(d[3], fixed=False)
     self.d5 = Decoder(d[4], fixed=False)
+    self.d6 = Decoder(d[5], fixed=False)
+    self.d7 = Decoder(d[6], fixed=False)
     self.se = SmallEncoder(e2, fixed=False)
     self.defined_trans = Transform8()
-    
     
 AutoEncoders = {
 "BD": AutoEncoder_BD,

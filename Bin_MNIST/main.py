@@ -46,6 +46,8 @@ if __name__ == "__main__":
   parser.add_argument('--d3',  type=str,   default=None)# "../Ex*/*81/w*/*BD*E76S0*.pth")  # "../Ex*/test/w*/*1559_BD_E508S0*.pth"
   parser.add_argument('--d4',  type=str,   default=None)# "../Ex*/*81/w*/*BD*E76S0*.pth")  # "../Ex*/test/w*/*1559_BD_E508S0*.pth"
   parser.add_argument('--d5',  type=str,   default=None)# "../Ex*/*81/w*/*BD*E76S0*.pth")  # "../Ex*/test/w*/*1559_BD_E508S0*.pth"
+  parser.add_argument('--d6',  type=str,   default=None)# "../Ex*/*81/w*/*BD*E76S0*.pth")  # "../Ex*/test/w*/*1559_BD_E508S0*.pth"
+  parser.add_argument('--d7',  type=str,   default=None)# "../Ex*/*81/w*/*BD*E76S0*.pth")  # "../Ex*/test/w*/*1559_BD_E508S0*.pth"
   parser.add_argument('--t',   type=str,   default=None)
   parser.add_argument('--gpu', type=int,   default=0)
   parser.add_argument('--lr',  type=float, default=1e-3)
@@ -93,6 +95,8 @@ if __name__ == "__main__":
   args.d3 = glob.glob(args.d3)[0] if args.d3 != None else None
   args.d4 = glob.glob(args.d4)[0] if args.d4 != None else None
   args.d5 = glob.glob(args.d5)[0] if args.d5 != None else None
+  args.d6 = glob.glob(args.d6)[0] if args.d6 != None else None
+  args.d7 = glob.glob(args.d7)[0] if args.d7 != None else None
   
   # Check mode
   assert(args.mode in AutoEncoders.keys())
@@ -123,7 +127,7 @@ if __name__ == "__main__":
   elif args.adv_train == 2:
     ae = AE(args.e1, args.d, args.e2, args.t)
   elif args.adv_train == 3:
-    d = (args.d1, args.d2, args.d3, args.d4, args.d5)
+    d = (args.d1, args.d2, args.d3, args.d4, args.d5, args.d6, args.d7)
     ae = AE(args.e1, d, args.e2)
   ae.cuda()
   
@@ -170,23 +174,14 @@ if __name__ == "__main__":
       if param.requires_grad:
         ema_trans2.register(name, param.data)
   elif args.adv_train == 3:
-    ema_d1 = EMA(args.EMA); ema_d2 = EMA(args.EMA); ema_d3 = EMA(args.EMA); ema_d4 = EMA(args.EMA); ema_d5 = EMA(args.EMA)
+    ema_d1 = EMA(args.EMA); ema_d2 = EMA(args.EMA); ema_d3 = EMA(args.EMA); ema_d4 = EMA(args.EMA); ema_d5 = EMA(args.EMA); ema_d6 = EMA(args.EMA); ema_d7 = EMA(args.EMA)
+    for di in range(7):
+      dec = eval("ae.d%s"  % (di+1))
+      ema = eval("ema_d%s" % (di+1))
+      for name, param in dec.named_parameters():
+        if param.requires_grad:
+          ema.register(name, param.data)
     ema_se = EMA(args.EMA)
-    for name, param in ae.d1.named_parameters():
-      if param.requires_grad:
-        ema_d1.register(name, param.data)
-    for name, param in ae.d2.named_parameters():
-      if param.requires_grad:
-        ema_d2.register(name, param.data)
-    for name, param in ae.d3.named_parameters():
-      if param.requires_grad:
-        ema_d3.register(name, param.data)
-    for name, param in ae.d4.named_parameters():
-      if param.requires_grad:
-        ema_d4.register(name, param.data)
-    for name, param in ae.d5.named_parameters():
-      if param.requires_grad:
-        ema_d5.register(name, param.data)
     for name, param in ae.se.named_parameters():
       if param.requires_grad:
         ema_se.register(name, param.data)
@@ -248,6 +243,8 @@ if __name__ == "__main__":
     optimizer_d3 = torch.optim.Adam(ae.d3.parameters(), lr=args.lr, betas=(args.b1, args.b2))
     optimizer_d4 = torch.optim.Adam(ae.d4.parameters(), lr=args.lr, betas=(args.b1, args.b2))
     optimizer_d5 = torch.optim.Adam(ae.d5.parameters(), lr=args.lr, betas=(args.b1, args.b2))
+    optimizer_d6 = torch.optim.Adam(ae.d6.parameters(), lr=args.lr, betas=(args.b1, args.b2))
+    optimizer_d7 = torch.optim.Adam(ae.d7.parameters(), lr=args.lr, betas=(args.b1, args.b2))
     
   # Resume previous step
   previous_epoch = previous_step = 0
@@ -547,7 +544,7 @@ if __name__ == "__main__":
       if args.adv_train == 3:
         # update decoder
         imgrec = []; imgrec_DT = []; hardloss_dec = []; trainacc_dec = []
-        for i in range(5): # 5 decoders
+        for i in range(7): # 7 decoders
           dec = eval("ae.d%s" % (i+1)); optimizer = eval("optimizer_d%s" % (i+1)); ema = eval("ema_d%s" % (i+1))
           dec.zero_grad()
           imgrec1 = dec(x);       feats1 = ae.be.forward_branch(imgrec1); logits1 = feats1[-1]
@@ -577,14 +574,15 @@ if __name__ == "__main__":
           pred = logits1.detach().max(1)[1]; trainacc = pred.eq(label.view_as(pred)).sum().cpu().data.numpy() / float(args.batch_size)
           hardloss_dec.append(hardloss1.data.cpu().numpy()); trainacc_dec.append(trainacc)
           
-          logits_dse = ae.se(imgrec1)
+          logits_dse = ae.se(imgrec1); logits_dse_DT = ae.se(imgrec1_DT)
           hardloss_dse = nn.CrossEntropyLoss()(logits_dse, label.data) * args.hardloss_weight
+          hardloss_dse_DT = nn.CrossEntropyLoss()(logits_dse_DT, label.data) * args.hardloss_weight
           
           # total loss
           loss = tvloss1 + imgnorm1 + tvloss2 + imgnorm2 + \
                   ploss1 + ploss2 + ploss3 + ploss4 + \
                   softloss1 + hardloss1 + hardloss1_DT + softloss2 + hardloss2 \
-                  + 1.0 / hardloss_dse
+                  + 0.25 / hardloss_dse + 0.25 / hardloss_dse_DT
           loss.backward()
           optimizer.step()
           for name, param in dec.named_parameters():
@@ -595,9 +593,9 @@ if __name__ == "__main__":
         ae.se.zero_grad()
         loss_se = 0
         hardloss_se = []; trainacc_se = []
-        for i in range(len(imgrec)):
-          logits = ae.se(imgrec[i].detach())
-          logits_DT = ae.se(imgrec_DT[i].detach())
+        for di in range(len(imgrec)):
+          logits = ae.se(imgrec[di].detach())
+          logits_DT = ae.se(imgrec_DT[di].detach())
           hardloss = nn.CrossEntropyLoss()(logits, label.data) * args.hardloss_weight
           hardloss_DT = nn.CrossEntropyLoss()(logits_DT, label.data) * args.daloss_weight
           loss_se += hardloss + hardloss_DT
@@ -651,10 +649,10 @@ if __name__ == "__main__":
                 (time.time()-t1)/SHOW_INTERVAL), log)
           
           elif args.adv_train == 3:
-            format_str = "E{}S{} | dec: {:.4f}({:.3f}) {:.4f}({:.3f}) {:.4f}({:.3f}) {:.4f}({:.3f}) {:.4f}({:.3f}) | se: {:.4f}({:.3f}) {:.4f}({:.3f}) {:.4f}({:.3f}) {:.4f}({:.3f}) {:.4f}({:.3f}) | tv: {:.5f} norm: {:.5f} p: {:.5f} {:.5f} {:.5f} {:.5f} ({:.3f}s/step)"
+            format_str = "E{}S{} | dec: {:.4f}({:.3f}) {:.4f}({:.3f}) {:.4f}({:.3f}) {:.4f}({:.3f}) {:.4f}({:.3f}) {:.4f}({:.3f}) {:.4f}({:.3f}) | se: {:.4f}({:.3f}) {:.4f}({:.3f}) {:.4f}({:.3f}) {:.4f}({:.3f}) {:.4f}({:.3f}) {:.4f}({:.3f}) {:.4f}({:.3f}) | tv: {:.5f} norm: {:.5f} p: {:.5f} {:.5f} {:.5f} {:.5f} ({:.3f}s/step)"
             logprint(format_str.format(epoch, step,
-                hardloss_dec[0], trainacc_dec[0], hardloss_dec[1], trainacc_dec[1], hardloss_dec[2], trainacc_dec[2], hardloss_dec[3], trainacc_dec[3], hardloss_dec[4], trainacc_dec[4],
-                hardloss_se[0 ], trainacc_se[0 ], hardloss_se[1 ], trainacc_se[1 ], hardloss_se[2 ], trainacc_se[2 ], hardloss_se[3 ], trainacc_se[3 ], hardloss_se[4 ], trainacc_se[4 ],
+                hardloss_dec[0], trainacc_dec[0], hardloss_dec[1], trainacc_dec[1], hardloss_dec[2], trainacc_dec[2], hardloss_dec[3], trainacc_dec[3], hardloss_dec[4], trainacc_dec[4], hardloss_dec[5], trainacc_dec[5], hardloss_dec[6], trainacc_dec[6],
+                hardloss_se[0 ], trainacc_se[0 ], hardloss_se[1 ], trainacc_se[1 ], hardloss_se[2 ], trainacc_se[2 ], hardloss_se[3 ], trainacc_se[3 ], hardloss_se[4 ], trainacc_se[4 ], hardloss_se[5 ], trainacc_se[5 ], hardloss_se[6 ], trainacc_se[6 ],
                 softloss1.data.cpu().numpy(), tvloss1.data.cpu().numpy(), imgnorm1.data.cpu().numpy(), ploss1.data.cpu().numpy(), ploss2.data.cpu().numpy(), ploss3.data.cpu().numpy(), ploss4.data.cpu().numpy(),
                 (time.time()-t1)/SHOW_INTERVAL), log)
             
@@ -687,12 +685,19 @@ if __name__ == "__main__":
         # save some test images
         for i in range(len(test_codes)):
           x = test_codes[i].cuda()
-          img1 = ae.dec(x)
-          img1_DA = ae.learned_trans(img1)
-          out_img1_path = pjoin(rec_img_path, "%s_E%sS%s_img%s-rec_label=%s.jpg" % (TIME_ID, epoch, step, i, test_labels[i]))
-          out_img1_DA_path = pjoin(rec_img_path, "%s_E%sS%s_img%s-rec_DA_label=%s.jpg" % (TIME_ID, epoch, step, i, test_labels[i]))
-          vutils.save_image(img1.data.cpu().float(), out_img1_path) # save some samples to check
-          vutils.save_image(img1_DA.data.cpu().float(), out_img1_DA_path) # save some samples to check
+          if args.adv_train == 3:
+            for di in range(7):
+              dec = eval("ae.d%s" % (di+1))
+              img1 = dec(x)
+              out_img1_path = pjoin(rec_img_path, "%s_E%sS%s_imgrec%s_label=%s_d%s.jpg" % (TIME_ID, epoch, step, i, test_labels[i], di))
+              vutils.save_image(img1.data.cpu().float(), out_img1_path)
+          else:
+            img1 = ae.dec(x)
+            img1_DA = ae.learned_trans(img1)
+            out_img1_path = pjoin(rec_img_path, "%s_E%sS%s_img%s-rec_label=%s.jpg" % (TIME_ID, epoch, step, i, test_labels[i]))
+            out_img1_DA_path = pjoin(rec_img_path, "%s_E%sS%s_img%s-rec_DA_label=%s.jpg" % (TIME_ID, epoch, step, i, test_labels[i]))
+            vutils.save_image(img1.data.cpu().float(), out_img1_path) # save some samples to check
+            vutils.save_image(img1_DA.data.cpu().float(), out_img1_DA_path) # save some samples to check
         
         # test with the real codes generated from test set
         test_loader = torch.utils.data.DataLoader(data_test,  batch_size=100, shuffle=False, **kwargs)
@@ -747,6 +752,8 @@ if __name__ == "__main__":
           torch.save(ae.d3.state_dict(), pjoin(weights_path, "%s_d3_E%sS%s.pth" % (TIME_ID, epoch, step)))
           torch.save(ae.d4.state_dict(), pjoin(weights_path, "%s_d4_E%sS%s.pth" % (TIME_ID, epoch, step)))
           torch.save(ae.d5.state_dict(), pjoin(weights_path, "%s_d5_E%sS%s.pth" % (TIME_ID, epoch, step)))
+          torch.save(ae.d6.state_dict(), pjoin(weights_path, "%s_d6_E%sS%s.pth" % (TIME_ID, epoch, step)))
+          torch.save(ae.d7.state_dict(), pjoin(weights_path, "%s_d7_E%sS%s.pth" % (TIME_ID, epoch, step)))
           torch.save(ae.se.state_dict(), pjoin(weights_path, "%s_se_E%sS%s_testacc=%.4f.pth" % (TIME_ID, epoch, step, test_acc)))
   
   log.close()
