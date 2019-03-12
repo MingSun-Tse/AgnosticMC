@@ -647,7 +647,6 @@ class STN(nn.Module):
     x = F.grid_sample(x, grid)
     return x
 
-
 class AutoEncoder_BDSE_GAN2(nn.Module):
   def __init__(self, e1=None, d=None, e2=None, trans_model=None):
     super(AutoEncoder_BDSE_GAN2, self).__init__()
@@ -657,11 +656,24 @@ class AutoEncoder_BDSE_GAN2(nn.Module):
     self.defined_trans = Transform8()
     self.advbe  = AdvEncoder(None, fixed=False); self.learned_trans = STN() # LearnedTransform(trans_model, fixed=False)
     self.advbe2 = AdvEncoder(None, fixed=False); self.learned_trans2 = LearnedTransform(trans_model, fixed=False)
+
+class AutoEncoder_BDSE_GAN3(nn.Module):
+  def __init__(self, e1=None, d=None, e2=None):
+    super(AutoEncoder_BDSE_GAN3, self).__init__()
+    self.be = Encoder(e1, fixed=True).eval()
+    self.d1 = Decoder(d[0], fixed=False)
+    self.d2 = Decoder(d[1], fixed=False)
+    self.d3 = Decoder(d[2], fixed=False)
+    self.d4 = Decoder(d[3], fixed=False)
+    self.d5 = Decoder(d[4], fixed=False)
+    self.se = SmallEncoder(e2, fixed=False)
+    self.defined_trans = Transform8()
+    
     
 AutoEncoders = {
 "BD": AutoEncoder_BD,
 "SE": AutoEncoder_SE,
 "BDSE": AutoEncoder_BDSE_Trans,
-"BDSE_GAN": AutoEncoder_BDSE_GAN2,
+"BDSE_GAN": AutoEncoder_BDSE_GAN3,
 }
   
