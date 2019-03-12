@@ -450,20 +450,22 @@ if __name__ == "__main__":
 
         ## update learned transform
         ae.learned_trans.zero_grad()
-        img_rec1_DA = ae.learned_trans(img_rec1.detach())
+        img_rec1_DA = ae.learned_trans(img_rec1.detach()); img_rec1_DA_definedDA = ae.defined_trans(img_rec1_DA)
         logits1_DA        = ae.enc(img_rec1_DA);    loss_trans_BE    = nn.CrossEntropyLoss()(logits1_DA,       label.data) * args.hardloss_weight
         logits1_DA_AdvBE  = ae.advbe(img_rec1_DA);  loss_trans_AdvBE = nn.CrossEntropyLoss()(logits1_DA_AdvBE, label.data) * args.hardloss_weight
+        logits1_DA_definedDA = ae.enc(img_rec1_DA_definedDA); loss_trans_BE_definedDA = nn.CrossEntropyLoss()(logits1_DA_definedDA, label.data) * args.daloss_weight
+        
         # DA img loss
         tvloss1_DA = args.tvloss_weight * (torch.sum(torch.abs(img_rec1_DA[:, :, :, :-1] - img_rec1_DA[:, :, :, 1:])) + 
-                                           torch.sum(torch.abs(img_rec1_DA[:, :, :-1, :] - img_rec1_DA[:, :, 1:, :]))) * 0.1
-        img_norm1_DA = torch.pow(torch.norm(img_rec1_DA, p=6), 6) * args.normloss_weight * 0.1
+                                           torch.sum(torch.abs(img_rec1_DA[:, :, :-1, :] - img_rec1_DA[:, :, 1:, :]))) * 0.25
+        img_norm1_DA = torch.pow(torch.norm(img_rec1_DA, p=6), 6) * args.normloss_weight * 0.25
         
         # # LT2
         # img_rec1_DA2 = ae.learned_trans2(img_rec1.detach())
         # logits1_DA2       = ae.enc(img_rec1_DA2);    loss_trans_BE2    = nn.CrossEntropyLoss()(logits1_DA2,       label.data) * args.hardloss_weight
         # logits1_DA_AdvBE2 = ae.advbe2(img_rec1_DA2); loss_trans_AdvBE2 = nn.CrossEntropyLoss()(logits1_DA_AdvBE2, label.data) * args.hardloss_weight
         
-        loss_trans  = loss_trans_BE  / (loss_trans_AdvBE  * args.alpha) + tvloss1_DA + img_norm1_DA # + (loss_trans_BE  - loss_trans_AdvBE)  * (loss_trans_BE  - loss_trans_AdvBE)  * args.beta
+        loss_trans  = loss_trans_BE / (loss_trans_AdvBE * args.alpha) + tvloss1_DA + img_norm1_DA # + (loss_trans_BE  - loss_trans_AdvBE)  * (loss_trans_BE  - loss_trans_AdvBE)  * args.beta
         # loss_trans2 = loss_trans_BE2 / (loss_trans_AdvBE2 * args.alpha) + (loss_trans_BE2 - loss_trans_AdvBE2) * (loss_trans_BE2 - loss_trans_AdvBE2) * args.beta
         
         pred_DA_BE    = logits1_DA.detach().max(1)[1];       trainacc_DA_BE    = pred_DA_BE.eq(label.view_as(pred_DA_BE)).sum().cpu().data.numpy() / float(args.batch_size)
@@ -480,18 +482,22 @@ if __name__ == "__main__":
         
         ## update SE
         ae.small_enc.zero_grad()
-        Slogits = ae.small_enc(img_rec1.detach())
+        Sfeats1 = ae.small_enc.forward_branch(img_rec1.detach()); Slogits = Sfeats1[-1]
         Slogprob = F.log_softmax(Slogits/args.Temp, dim=1); prob_BE = F.softmax(logits1/args.Temp, dim=1)
         Ssoftloss = nn.KLDivLoss()(Slogprob, prob_BE.data) * (args.Temp*args.Temp) * args.softloss_weight
         Shardloss = nn.CrossEntropyLoss()(Slogits, label.data) * args.hardloss_weight
         
-        Slogits_DA  = ae.small_enc(img_rec1_DA.detach());  Shardloss_DA  = nn.CrossEntropyLoss()(Slogits_DA,  label.data)
+        # feature reconstruction loss: train the small encoder
+        floss3 = nn.MSELoss()(Sfeats1[2], feats1[2].data) * args.floss_weight * floss_lw[2]
+        floss4 = nn.MSELoss()(Sfeats1[3], feats1[3].data) * args.floss_weight * floss_lw[3]
+        
+        Slogits_DA  = ae.small_enc(img_rec1_DA.detach());  Shardloss_DA  = nn.CrossEntropyLoss()(Slogits_DA,  label.data) * (hardloss1.data / loss_trans_BE.data)
         # Slogits_DA2 = ae.small_enc(img_rec1_DA2.detach()); Shardloss_DA2 = nn.CrossEntropyLoss()(Slogits_DA2, label.data)
         
         Spred    = Slogits.detach().max(1)[1];    trainacc_SE    = Spred.eq(label.view_as(Spred)).sum().cpu().data.numpy() / float(args.batch_size)
         Spred_DA = Slogits_DA.detach().max(1)[1]; trainacc_DA_SE = Spred_DA.eq(label.view_as(Spred_DA)).sum().cpu().data.numpy() / float(args.batch_size)
         
-        loss_SE = Ssoftloss + Shardloss + Shardloss_DA #+ Shardloss_DA2
+        loss_SE = Ssoftloss + Shardloss + Shardloss_DA + (floss3 + floss4) #+ Shardloss_DA2
         loss_SE.backward()
         optimizer_SE.step()
         for name, param in ae.small_enc.named_parameters():

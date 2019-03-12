@@ -219,11 +219,12 @@ class LearnedTransform(nn.Module):
     self.conv32 = nn.Conv2d(8, 8, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
     self.conv33 = nn.Conv2d(8, 1, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
     
-    self.conv31 = nn.Conv2d(1, 8, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
-    self.conv32 = nn.Conv2d(8, 8, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
-    self.conv33 = nn.Conv2d(8, 1, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+    self.conv41 = nn.Conv2d(1, 8, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+    self.conv42 = nn.Conv2d(8, 8, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+    self.conv43 = nn.Conv2d(8, 1, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
     
     self.relu = nn.ReLU(inplace=True)
+    self.trans = Transform8()
     
     if model:
       self.load_state_dict(torch.load(model))
@@ -234,13 +235,16 @@ class LearnedTransform(nn.Module):
   def forward(self, x):
     y = self.relu(self.conv11(x))
     y = self.relu(self.conv12(y))
-    x = self.relu(self.conv13(y)) + x
+    x = (self.relu(self.conv13(y)) + x) / 2
     y = self.relu(self.conv21(x))
     y = self.relu(self.conv22(y))
-    x = self.relu(self.conv23(y)) + x
+    x = (self.relu(self.conv23(y)) + x) / 2
     y = self.relu(self.conv31(x))
     y = self.relu(self.conv32(y))
-    x = self.relu(self.conv33(y))
+    x = (self.relu(self.conv33(y)) + x) / 2
+    y = self.relu(self.conv41(x))
+    y = self.relu(self.conv42(y))
+    x = (self.relu(self.conv43(y)) + x) / 2
     return x
     
 # ---------------------------------------------------
@@ -609,7 +613,41 @@ class AutoEncoder_BDSE_GAN(nn.Module):
     self.advbe = Encoder(None, fixed=False) # adversarial encoder
     self.small_enc = SmallEncoder(e2, fixed=False)
     self.transform = Transform8()
-    
+
+# Spatial Transformer Network
+class STN(nn.Module):
+  def __init__(self):
+    super(STN, self).__init__()
+    # Spatial transformer localization-network
+    self.localization = nn.Sequential(
+        nn.Conv2d(1, 8, kernel_size=7),
+        nn.MaxPool2d(2, stride=2),
+        nn.ReLU(True),
+        nn.Conv2d(8, 10, kernel_size=5),
+        nn.MaxPool2d(2, stride=2),
+        nn.ReLU(True)
+    )
+    # Regressor for the 3 * 2 affine matrix
+    self.fc_loc = nn.Sequential(
+        nn.Linear(10 * 4 * 4, 32),
+        nn.ReLU(True),
+        nn.Linear(32, 3 * 2)
+    )
+    # Initialize the weights/bias with identity transformation
+    self.fc_loc[2].weight.data.zero_()
+    self.fc_loc[2].bias.data.copy_(torch.tensor([1, 0, 0, 0, 1, 0], dtype=torch.float))
+  
+  # Spatial transformer network forward function
+  def forward(self, x):
+    xs = self.localization(x) # shape: batch x 10 x 4 x 4
+    xs = xs.view(-1, 10 * 4 * 4)
+    theta = self.fc_loc(xs) # batch x 6
+    theta = theta.view(-1, 2, 3)
+    grid = F.affine_grid(theta, x.size())
+    x = F.grid_sample(x, grid)
+    return x
+
+
 class AutoEncoder_BDSE_GAN2(nn.Module):
   def __init__(self, e1=None, d=None, e2=None, trans_model=None):
     super(AutoEncoder_BDSE_GAN2, self).__init__()
@@ -617,10 +655,8 @@ class AutoEncoder_BDSE_GAN2(nn.Module):
     self.dec = Decoder(d,  fixed=False)
     self.small_enc = SmallEncoder(e2, fixed=False)
     self.defined_trans = Transform8()
-    
-    self.advbe  = AdvEncoder(None, fixed=False); self.learned_trans = LearnedTransform(trans_model, fixed=False)
+    self.advbe  = AdvEncoder(None, fixed=False); self.learned_trans = STN() # LearnedTransform(trans_model, fixed=False)
     self.advbe2 = AdvEncoder(None, fixed=False); self.learned_trans2 = LearnedTransform(trans_model, fixed=False)
-    
     
 AutoEncoders = {
 "BD": AutoEncoder_BD,

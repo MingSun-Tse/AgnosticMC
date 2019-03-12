@@ -54,10 +54,10 @@ randomaffine = transforms.RandomAffine(degrees=5, translate=(0.1, 0.1), scale=(0
 
 # Prepare images
 ## fake images
-fake_img_path = "*1606*label=4.jpg"  #"../Experiments/test_xx/reconstructed_images/SERVER12-20190303-1607_E509S0_img3-rec1_label=4.jpg"
+fake_img_path = "*0955*label=0.jpg"  #"../Experiments/test_xx/reconstructed_images/SERVER12-20190303-1607_E509S0_img3-rec1_label=4.jpg"
 fake_img_path = glob.glob(fake_img_path)[0]
 # fake_img_rec_path = fake_img_path.replace(".jpg", "_rec.jpg"); deep_transform(fake_img_path, fake_img_rec_path)
-fake_img_dil_ero_path = dilate(erode((fake_img_path)))
+fake_img_dil_ero_path = erode(dilate((fake_img_path)))
 fake_img = Image.open(fake_img_dil_ero_path).convert("L")
 fake_img_label = int(fake_img_path.split("=")[1][0])
 
@@ -80,7 +80,7 @@ real_img = Image.open(real_img_path).convert("L")
 
 # Set up models
 BE_path = "train_baseline_lenet5/trained_weights2/weights/SERVER12-20190222-1834_E17S0_acc=0.9919.pth"
-SE_path = "../Experiments/test_xx/weights/SERVER12-20190303-1607_SE_E508S0_testacc=0.5533.pth"
+SE_path = "../Experiments/20190311-1249_improve_LT_BD-no-dropout-no-leak-info_add-DA-img-lossx0.1/weights/SERVER12-20190311-1249_SE_E5S0_testacc=0.4003.pth"
 BE = LeNet5(BE_path).cuda()
 SE = SmallLeNet5(SE_path).cuda()
 # BE = SE
