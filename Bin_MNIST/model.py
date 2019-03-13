@@ -658,26 +658,19 @@ class AutoEncoder_BDSE_GAN2(nn.Module):
     self.advbe2 = AdvEncoder(None, fixed=False); self.learned_trans2 = LearnedTransform(trans_model, fixed=False)
 
 class AutoEncoder_BDSE_GAN3(nn.Module):
-  def __init__(self, e1=None, d=None, e2=None):
+  def __init__(self, args):
     super(AutoEncoder_BDSE_GAN3, self).__init__()
-    self.be  = Encoder(e1, fixed=True).eval()
-    self.d1  = Decoder(d[0 ], fixed=False)
-    self.d2  = Decoder(d[1 ], fixed=False)
-    self.d3  = Decoder(d[2 ], fixed=False)
-    self.d4  = Decoder(d[3 ], fixed=False)
-    self.d5  = Decoder(d[4 ], fixed=False)
-    self.d6  = Decoder(d[5 ], fixed=False)
-    self.d7  = Decoder(d[6 ], fixed=False)
-    self.d8  = Decoder(d[7 ], fixed=False)
-    self.d9  = Decoder(d[8 ], fixed=False)
-    self.d10 = Decoder(d[9 ], fixed=False)
-    self.d11 = Decoder(d[10], fixed=False)
-    self.d12 = Decoder(d[11], fixed=False)
-    self.d13 = Decoder(d[12], fixed=False)
-    self.d14 = Decoder(d[13], fixed=False)
-    self.d15 = Decoder(d[14], fixed=False)
-    self.se  = SmallEncoder(e2, fixed=False)
+    self.be = Encoder(args.e1, fixed=True).eval()
+    self.se = SmallEncoder(args.e2, fixed=False)
     self.defined_trans = Transform8()
+    for di in range(1, args.num_dec+1):
+      pretrained_model = None
+      if args.pretrained_dir:
+        assert(args.pretrained_timeid != None)
+        pretrained_model = [x for x in os.listdir(args.pretrained_dir) if "_d%s_" % di in x and args.pretrained_timeid in x] # the number of pretrained decoder should be like "SERVER218-20190313-1233_d3_E0S0.pth"
+        assert(len(pretrained_model) == 1)
+        pretrained_model = pretrained_model[0]
+      self.__setattr__("d"+str(di), Decoder(pretrained_model, fixed=False))
     
 AutoEncoders = {
 "BD": AutoEncoder_BD,

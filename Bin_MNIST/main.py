@@ -29,6 +29,63 @@ from model import AutoEncoders, EMA
 
 def logprint(some_str, f=sys.stdout):
   print(time.strftime("[%s" % os.getpid() + "-%Y/%m/%d-%H:%M] ") + str(some_str), file=f, flush=True)
+  
+def path_check(x):
+  if x:
+    complete_path = glob.glob(x)
+    assert(len(complete_path) == 1)
+    x = complete_path[0]
+  return x
+
+# Passed-in params
+parser = argparse.ArgumentParser(description="Knowledge Transfer")
+parser.add_argument('--e1',  type=str,   default="train*/*2/w*/*E17S0*.pth")
+parser.add_argument('--e2',  type=str,   default=None)
+parser.add_argument('--pretrained_dir',   type=str, default=None, help="the directory of pretrained decoder models")
+parser.add_argument('--pretrained_timeid',type=str, default=None, help="the timeid of the pretrained models.")
+parser.add_argument('--num_dec', type=int, default=9)
+parser.add_argument('--t',   type=str,   default=None)
+parser.add_argument('--gpu', type=int,   default=0)
+parser.add_argument('--lr',  type=float, default=1e-3)
+parser.add_argument('--b1',  type=float, default=5e-4, help='adam: decay of first order momentum of gradient')
+parser.add_argument('--b2',  type=float, default=5e-4, help='adam: decay of second order momentum of gradient')
+# ----------------------------------------------------------------
+# various losses
+parser.add_argument('--floss_weight',    type=float, default=1)
+parser.add_argument('--ploss_weight',    type=float, default=2)
+parser.add_argument('--softloss_weight', type=float, default=10) # According to the paper KD, the soft target loss weight should be considarably larger than that of hard target loss.
+parser.add_argument('--hardloss_weight', type=float, default=1)
+parser.add_argument('--tvloss_weight',   type=float, default=1e-6)
+parser.add_argument('--normloss_weight', type=float, default=1e-4)
+parser.add_argument('--daloss_weight',   type=float, default=10)
+parser.add_argument('--advloss_weight',  type=float, default=20)
+parser.add_argument('--lw_adv',  type=float, default=0.5)
+parser.add_argument('--floss_lw', type=str, default="1-1-1-1-1-1-1")
+parser.add_argument('--ploss_lw', type=str, default="1-1-1-1-1-1-1")
+# ----------------------------------------------------------------
+parser.add_argument('-b', '--batch_size', type=int, default=100)
+parser.add_argument('--test_batch_size',  type=int, default=5)
+parser.add_argument('-p', '--project_name', type=str, default="test")
+parser.add_argument('-r', '--resume', action='store_true')
+parser.add_argument('-m', '--mode', type=str, help='the training mode name.')
+parser.add_argument('--num_epoch', type=int, default=96)
+parser.add_argument('--debug', action="store_true")
+parser.add_argument('--num_class', type=int, default=10)
+parser.add_argument('--use_pseudo_code', action="store_false")
+parser.add_argument('--begin', type=float, default=25)
+parser.add_argument('--end',   type=float, default=20)
+parser.add_argument('--Temp',  type=float, default=1, help="the Tempature in KD")
+parser.add_argument('--adv_train', type=int, default=0)
+parser.add_argument('--alpha', type=float, default=1, help="a factor to balance the GAN-style loss")
+parser.add_argument('--beta', type=float, default=1e-6, help="a factor to balance the GAN-style loss")
+parser.add_argument('--G_update_interval', type=int, default=1)
+parser.add_argument('--EMA', type=float, default=0.9, help="Exponential Moving Average") 
+args = parser.parse_args()
+
+# Update and check args
+args.e1 = path_check(args.e1)
+args.e2 = path_check(args.e2)
+args.pretrained_dir = path_check(args.pretrained_dir)
 
   
 if __name__ == "__main__":
@@ -36,88 +93,6 @@ if __name__ == "__main__":
   SHOW_INTERVAL = 100
   SAVE_INTERVAL = 2000
 
-  # Passed-in params
-  parser = argparse.ArgumentParser(description="Knowledge Transfer")
-  parser.add_argument('--e1',  type=str,   default="train*/*2/w*/*E17S0*.pth")
-  parser.add_argument('--e2',  type=str,   default=None)
-  parser.add_argument('--d',   type=str,   default=None)# "../Ex*/*81/w*/*BD*E76S0*.pth")  # "../Ex*/test/w*/*1559_BD_E508S0*.pth"
-  parser.add_argument('--d1',  type=str,   default=None)# "../Ex*/*81/w*/*BD*E76S0*.pth")  # "../Ex*/test/w*/*1559_BD_E508S0*.pth"
-  parser.add_argument('--d2',  type=str,   default=None)# "../Ex*/*81/w*/*BD*E76S0*.pth")  # "../Ex*/test/w*/*1559_BD_E508S0*.pth"
-  parser.add_argument('--d3',  type=str,   default=None)# "../Ex*/*81/w*/*BD*E76S0*.pth")  # "../Ex*/test/w*/*1559_BD_E508S0*.pth"
-  parser.add_argument('--d4',  type=str,   default=None)# "../Ex*/*81/w*/*BD*E76S0*.pth")  # "../Ex*/test/w*/*1559_BD_E508S0*.pth"
-  parser.add_argument('--d5',  type=str,   default=None)# "../Ex*/*81/w*/*BD*E76S0*.pth")  # "../Ex*/test/w*/*1559_BD_E508S0*.pth"
-  parser.add_argument('--d6',  type=str,   default=None)# "../Ex*/*81/w*/*BD*E76S0*.pth")  # "../Ex*/test/w*/*1559_BD_E508S0*.pth"
-  parser.add_argument('--d7',  type=str,   default=None)# "../Ex*/*81/w*/*BD*E76S0*.pth")  # "../Ex*/test/w*/*1559_BD_E508S0*.pth"
-  parser.add_argument('--d8',  type=str,   default=None)# "../Ex*/*81/w*/*BD*E76S0*.pth")  # "../Ex*/test/w*/*1559_BD_E508S0*.pth"
-  parser.add_argument('--d9',  type=str,   default=None)# "../Ex*/*81/w*/*BD*E76S0*.pth")  # "../Ex*/test/w*/*1559_BD_E508S0*.pth"
-  parser.add_argument('--d10', type=str,   default=None)# "../Ex*/*81/w*/*BD*E76S0*.pth")  # "../Ex*/test/w*/*1559_BD_E508S0*.pth"
-  parser.add_argument('--d11', type=str,   default=None)# "../Ex*/*81/w*/*BD*E76S0*.pth")  # "../Ex*/test/w*/*1559_BD_E508S0*.pth"
-  parser.add_argument('--d12', type=str,   default=None)# "../Ex*/*81/w*/*BD*E76S0*.pth")  # "../Ex*/test/w*/*1559_BD_E508S0*.pth"
-  parser.add_argument('--d13', type=str,   default=None)# "../Ex*/*81/w*/*BD*E76S0*.pth")  # "../Ex*/test/w*/*1559_BD_E508S0*.pth"
-  parser.add_argument('--d14', type=str,   default=None)# "../Ex*/*81/w*/*BD*E76S0*.pth")  # "../Ex*/test/w*/*1559_BD_E508S0*.pth"
-  parser.add_argument('--d15', type=str,   default=None)# "../Ex*/*81/w*/*BD*E76S0*.pth")  # "../Ex*/test/w*/*1559_BD_E508S0*.pth"
-  parser.add_argument('--t',   type=str,   default=None)
-  parser.add_argument('--gpu', type=int,   default=0)
-  parser.add_argument('--lr',  type=float, default=1e-3)
-  parser.add_argument('--b1',  type=float, default=5e-4, help='adam: decay of first order momentum of gradient')
-  parser.add_argument('--b2',  type=float, default=5e-4, help='adam: decay of second order momentum of gradient')
-  # ----------------------------------------------------------------
-  # various losses
-  parser.add_argument('--floss_weight',    type=float, default=1)
-  parser.add_argument('--ploss_weight',    type=float, default=2)
-  parser.add_argument('--softloss_weight', type=float, default=10) # According to the paper KD, the soft target loss weight should be considarably larger than that of hard target loss.
-  parser.add_argument('--hardloss_weight', type=float, default=1)
-  parser.add_argument('--tvloss_weight',   type=float, default=1e-6)
-  parser.add_argument('--normloss_weight', type=float, default=1e-4)
-  parser.add_argument('--daloss_weight',   type=float, default=10)
-  parser.add_argument('--advloss_weight',  type=float, default=20)
-  parser.add_argument('--floss_lw', type=str, default="1-1-1-1-1-1-1")
-  parser.add_argument('--ploss_lw', type=str, default="1-1-1-1-1-1-1")
-  # ----------------------------------------------------------------
-  parser.add_argument('-b', '--batch_size', type=int, default=100)
-  parser.add_argument('--test_batch_size',  type=int, default=5)
-  parser.add_argument('-p', '--project_name', type=str, default="test")
-  parser.add_argument('-r', '--resume', action='store_true')
-  parser.add_argument('-m', '--mode', type=str, help='the training mode name.')
-  parser.add_argument('--num_epoch', type=int, default=96)
-  parser.add_argument('--debug', action="store_true")
-  parser.add_argument('--num_class', type=int, default=10)
-  parser.add_argument('--use_pseudo_code', action="store_false")
-  parser.add_argument('--begin', type=float, default=25)
-  parser.add_argument('--end',   type=float, default=20)
-  parser.add_argument('--Temp',  type=float, default=1, help="the Tempature in KD")
-  parser.add_argument('--adv_train', type=int, default=0)
-  parser.add_argument('--alpha', type=float, default=1, help="a factor to balance the GAN-style loss")
-  parser.add_argument('--beta', type=float, default=1e-6, help="a factor to balance the GAN-style loss")
-  parser.add_argument('--G_update_interval', type=int, default=1)
-  parser.add_argument('--EMA', type=float, default=0.9, help="Exponential Moving Average") 
-  args = parser.parse_args()
-  
-  # Get path
-  args.e1 = glob.glob(args.e1)[0] if args.e1 != None else None
-  args.e2 = glob.glob(args.e2)[0] if args.e2 != None else None
-  args.d  = glob.glob(args.d )[0] if args.d  != None else None
-  args.t  = glob.glob(args.t )[0] if args.t  != None else None
-  args.d1 = glob.glob(args.d1)[0] if args.d1 != None else None
-  args.d2 = glob.glob(args.d2)[0] if args.d2 != None else None
-  args.d3 = glob.glob(args.d3)[0] if args.d3 != None else None
-  args.d4 = glob.glob(args.d4)[0] if args.d4 != None else None
-  args.d5 = glob.glob(args.d5)[0] if args.d5 != None else None
-  args.d6 = glob.glob(args.d6)[0] if args.d6 != None else None
-  args.d7 = glob.glob(args.d7)[0] if args.d7 != None else None
-  args.d8 = glob.glob(args.d8)[0] if args.d8 != None else None
-  args.d9 = glob.glob(args.d9)[0] if args.d9 != None else None
-  args.d10 = glob.glob(args.d10)[0] if args.d10 != None else None
-  args.d11 = glob.glob(args.d11)[0] if args.d11 != None else None
-  args.d12 = glob.glob(args.d12)[0] if args.d12 != None else None
-  args.d13 = glob.glob(args.d13)[0] if args.d13 != None else None
-  args.d14 = glob.glob(args.d14)[0] if args.d14 != None else None
-  args.d15 = glob.glob(args.d15)[0] if args.d15 != None else None
-  NUM_DEC = 15
-  
-  # Check mode
-  assert(args.mode in AutoEncoders.keys())
-  
   # Set up directories and logs, etc.
   TIME_ID = time.strftime("%Y%m%d-%H%M")
   project_path = pjoin("../Experiments", TIME_ID + "_" + args.project_name)
@@ -138,15 +113,14 @@ if __name__ == "__main__":
   log = sys.stdout if args.debug else open(log_path, "w+")
   
   # Set up model
+  assert(args.mode in AutoEncoders.keys())
   AE = AutoEncoders[args.mode]
   if args.adv_train in [0, 1]:
     ae = AE(args.e1, args.d, args.e2)
   elif args.adv_train == 2:
     ae = AE(args.e1, args.d, args.e2, args.t)
   elif args.adv_train == 3:
-    d = (args.d1, args.d2, args.d3, args.d4, args.d5, args.d6, args.d7, args.d8, args.d9,
-         args.d10, args.d11, args.d12, args.d13, args.d14, args.d15)
-    ae = AE(args.e1, d, args.e2)
+    ae = AE(args)
   ae.cuda()
   
   # Set up exponential moving average
@@ -192,37 +166,29 @@ if __name__ == "__main__":
       if param.requires_grad:
         ema_trans2.register(name, param.data)
   elif args.adv_train == 3:
-    ema_d1  = EMA(args.EMA); ema_d2  = EMA(args.EMA); ema_d3  = EMA(args.EMA); ema_d4  = EMA(args.EMA); ema_d5  = EMA(args.EMA)
-    ema_d6  = EMA(args.EMA); ema_d7  = EMA(args.EMA); ema_d8  = EMA(args.EMA); ema_d9  = EMA(args.EMA); ema_d10 = EMA(args.EMA)
-    ema_d11 = EMA(args.EMA); ema_d12 = EMA(args.EMA); ema_d13 = EMA(args.EMA); ema_d14 = EMA(args.EMA); ema_d15 = EMA(args.EMA)
-    for di in range(NUM_DEC):
-      dec = eval("ae.d%s"  % (di+1))
-      ema = eval("ema_d%s" % (di+1))
+    ema_dec = []
+    for di in range(1, args.num_dec+1):
+      ema_dec.append(EMA(args.EMA))
+      dec = eval("ae.d%s"  % di)
       for name, param in dec.named_parameters():
         if param.requires_grad:
-          ema.register(name, param.data)
+          ema_dec[-1].register(name, param.data)
     ema_se = EMA(args.EMA)
     for name, param in ae.se.named_parameters():
       if param.requires_grad:
         ema_se.register(name, param.data)
         
   # Prepare data
-  data_train = datasets.MNIST('./MNIST_data',
-                              train=True,
-                              download=True,
+  data_train = datasets.MNIST('./MNIST_data', train=True, download=True,
                               transform=transforms.Compose([
                                 transforms.Resize((32, 32)),
                                 transforms.ToTensor(),
-                                transforms.Normalize((0.1307,), (0.3081,))])
-                             )
-  data_test = datasets.MNIST('./MNIST_data',
-                              train=False,
-                              download=True,
+                                transforms.Normalize((0.1307,), (0.3081,))]))
+  data_test = datasets.MNIST('./MNIST_data', train=False, download=True,
                               transform=transforms.Compose([
                                 transforms.Resize((32, 32)),
                                 transforms.ToTensor(),
-                                transforms.Normalize((0.1307,), (0.3081,))])
-                             )
+                                transforms.Normalize((0.1307,), (0.3081,))]))
   kwargs = {'num_workers': 4, 'pin_memory': True}
   train_loader = torch.utils.data.DataLoader(data_train, batch_size=args.batch_size, shuffle=True, **kwargs)
   
@@ -258,21 +224,10 @@ if __name__ == "__main__":
     optimizer_trans2 = torch.optim.Adam(ae.learned_trans2.parameters(), lr=args.lr, betas=(args.b1, args.b2))
   elif args.adv_train == 3:
     optimizer_se  = torch.optim.Adam(ae.se.parameters(),  lr=args.lr, betas=(args.b1, args.b2))
-    optimizer_d1  = torch.optim.Adam(ae.d1.parameters(),  lr=args.lr, betas=(args.b1, args.b2))
-    optimizer_d2  = torch.optim.Adam(ae.d2.parameters(),  lr=args.lr, betas=(args.b1, args.b2))
-    optimizer_d3  = torch.optim.Adam(ae.d3.parameters(),  lr=args.lr, betas=(args.b1, args.b2))
-    optimizer_d4  = torch.optim.Adam(ae.d4.parameters(),  lr=args.lr, betas=(args.b1, args.b2))
-    optimizer_d5  = torch.optim.Adam(ae.d5.parameters(),  lr=args.lr, betas=(args.b1, args.b2))
-    optimizer_d6  = torch.optim.Adam(ae.d6.parameters(),  lr=args.lr, betas=(args.b1, args.b2))
-    optimizer_d7  = torch.optim.Adam(ae.d7.parameters(),  lr=args.lr, betas=(args.b1, args.b2))
-    optimizer_d8  = torch.optim.Adam(ae.d8.parameters(),  lr=args.lr, betas=(args.b1, args.b2))
-    optimizer_d9  = torch.optim.Adam(ae.d9.parameters(),  lr=args.lr, betas=(args.b1, args.b2))
-    optimizer_d10 = torch.optim.Adam(ae.d10.parameters(), lr=args.lr, betas=(args.b1, args.b2))
-    optimizer_d11 = torch.optim.Adam(ae.d11.parameters(), lr=args.lr, betas=(args.b1, args.b2))
-    optimizer_d12 = torch.optim.Adam(ae.d12.parameters(), lr=args.lr, betas=(args.b1, args.b2))
-    optimizer_d13 = torch.optim.Adam(ae.d13.parameters(), lr=args.lr, betas=(args.b1, args.b2))
-    optimizer_d14 = torch.optim.Adam(ae.d14.parameters(), lr=args.lr, betas=(args.b1, args.b2))
-    optimizer_d15 = torch.optim.Adam(ae.d15.parameters(), lr=args.lr, betas=(args.b1, args.b2))
+    optimizer_dec = []
+    for di in range(1, args.num_dec+1):
+      dec = eval("ae.d"+str(di))
+      optimizer_dec.append(torch.optim.Adam(dec.parameters(),  lr=args.lr, betas=(args.b1, args.b2)))
     
   # Resume previous step
   previous_epoch = previous_step = 0
@@ -572,8 +527,8 @@ if __name__ == "__main__":
       if args.adv_train == 3:
         # update decoder
         imgrec = []; imgrec_DT = []; hardloss_dec = []; trainacc_dec = []; ave_imgrec = 0
-        for i in range(NUM_DEC):
-          dec = eval("ae.d%s" % (i+1)); optimizer = eval("optimizer_d%s" % (i+1)); ema = eval("ema_d%s" % (i+1))
+        for di in range(1, args.num_dec+1):
+          dec = eval("ae.d"+str(di)); optimizer = optimizer_dec[di-1]; ema = ema_dec[di-1]
           dec.zero_grad()
           imgrec1 = dec(x);       feats1 = ae.be.forward_branch(imgrec1); logits1 = feats1[-1]
           imgrec2 = dec(logits1); feats2 = ae.be.forward_branch(imgrec2); logits2 = feats2[-1]
@@ -610,19 +565,19 @@ if __name__ == "__main__":
           loss = tvloss1 + imgnorm1 + tvloss2 + imgnorm2 + \
                   ploss1 + ploss2 + ploss3 + ploss4 + \
                   softloss1 + hardloss1 + hardloss1_DT + softloss2 + hardloss2 \
-                  + 0.5 / hardloss_dse
+                  + args.lw_adv / hardloss_dse
           loss.backward()
           optimizer.step()
           for name, param in dec.named_parameters():
             if param.requires_grad:
               param.data = ema(name, param.data)
-        ave_imgrec /= NUM_DEC
+        ave_imgrec /= args.num_dec
         
         ## update SE
         ae.se.zero_grad()
         loss_se = 0
         hardloss_se = []; trainacc_se = []
-        for di in range(NUM_DEC):
+        for di in range(args.num_dec):
           logits = ae.se(imgrec[di].detach())
           logits_DT = ae.se(imgrec_DT[di].detach())
           hardloss = nn.CrossEntropyLoss()(logits, label.data) * args.hardloss_weight
@@ -680,17 +635,20 @@ if __name__ == "__main__":
                 (time.time()-t1)/SHOW_INTERVAL), log)
           
           elif args.adv_train == 3:
-            format_str1 = "E{}S{}"
-            format_str2 = " | dec: {:.4f}({:.3f}) {:.4f}({:.3f}) {:.4f}({:.3f}) {:.4f}({:.3f}) {:.4f}({:.3f}) {:.4f}({:.3f}) {:.4f}({:.3f}) {:.4f}({:.3f}) {:.4f}({:.3f}) {:.4f}({:.3f}) {:.4f}({:.3f}) {:.4f}({:.3f}) {:.4f}({:.3f}) {:.4f}({:.3f}) {:.4f}({:.3f})"
-            format_str3 =  " | se: {:.4f}({:.3f}) {:.4f}({:.3f}) {:.4f}({:.3f}) {:.4f}({:.3f}) {:.4f}({:.3f}) {:.4f}({:.3f}) {:.4f}({:.3f}) {:.4f}({:.3f}) {:.4f}({:.3f}) {:.4f}({:.3f}) {:.4f}({:.3f}) {:.4f}({:.3f}) {:.4f}({:.3f}) {:.4f}({:.3f}) {:.4f}({:.3f})"
+            format_str1 = "E{}S{} | dec:"
+            format_str2 = " {:.4f}({:.3f})" * args.num_dec
+            format_str3 = " | se:"
             format_str4 = " | tv: {:.5f} norm: {:.5f} p: {:.5f} {:.5f} {:.5f} {:.5f} ({:.3f}s/step)"
-            format_str = "".join([format_str1, format_str2, format_str3, format_str4])
+            format_str = "".join([format_str1, format_str2, format_str3, format_str2, format_str4])
+            tmp1 = []; tmp2 = []
+            for i in range(args.num_dec):
+              tmp1.append(hardloss_dec[i])
+              tmp1.append(trainacc_dec[i])
+              tmp2.append(hardloss_se[i])
+              tmp2.append(trainacc_se[i])
             logprint(format_str.format(epoch, step,
-                hardloss_dec[0], trainacc_dec[0], hardloss_dec[1], trainacc_dec[1], hardloss_dec[2], trainacc_dec[2], hardloss_dec[3], trainacc_dec[3], hardloss_dec[4], trainacc_dec[4], hardloss_dec[5], trainacc_dec[5], hardloss_dec[6], trainacc_dec[6], hardloss_dec[7], trainacc_dec[7], hardloss_dec[8], trainacc_dec[8],
-                hardloss_dec[9], trainacc_dec[9], hardloss_dec[10], trainacc_dec[10], hardloss_dec[11], trainacc_dec[11], hardloss_dec[12], trainacc_dec[12], hardloss_dec[13], trainacc_dec[13], hardloss_dec[14], trainacc_dec[14],
-                hardloss_se[0 ], trainacc_se[0 ], hardloss_se[1 ], trainacc_se[1 ], hardloss_se[2 ], trainacc_se[2 ], hardloss_se[3 ], trainacc_se[3 ], hardloss_se[4 ], trainacc_se[4 ], hardloss_se[5 ], trainacc_se[5 ], hardloss_se[6 ], trainacc_se[6 ], hardloss_se[7 ], trainacc_se[7 ], hardloss_se[8 ], trainacc_se[8 ],
-                hardloss_se[9], trainacc_se[9], hardloss_se[10], trainacc_se[10], hardloss_se[11], trainacc_se[11], hardloss_se[12], trainacc_se[12], hardloss_se[13], trainacc_se[13], hardloss_se[14], trainacc_se[14],
-                softloss1.data.cpu().numpy(), tvloss1.data.cpu().numpy(), imgnorm1.data.cpu().numpy(), ploss1.data.cpu().numpy(), ploss2.data.cpu().numpy(), ploss3.data.cpu().numpy(), ploss4.data.cpu().numpy(),
+                *tmp1, *tmp2,
+                tvloss1.data.cpu().numpy(), imgnorm1.data.cpu().numpy(), ploss1.data.cpu().numpy(), ploss2.data.cpu().numpy(), ploss3.data.cpu().numpy(), ploss4.data.cpu().numpy(),
                 (time.time()-t1)/SHOW_INTERVAL), log)
             
         else:
