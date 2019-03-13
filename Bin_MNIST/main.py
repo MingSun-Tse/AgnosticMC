@@ -80,19 +80,17 @@ parser.add_argument('--alpha', type=float, default=1, help="a factor to balance 
 parser.add_argument('--beta', type=float, default=1e-6, help="a factor to balance the GAN-style loss")
 parser.add_argument('--G_update_interval', type=int, default=1)
 parser.add_argument('--EMA', type=float, default=0.9, help="Exponential Moving Average") 
+parser.add_argument('--show_interval', type=int, default=100, help="the interval to print logs")
+parser.add_argument('--save_interval', type=int, default=1000, help="the interval to save models")
 args = parser.parse_args()
 
 # Update and check args
 args.e1 = path_check(args.e1)
 args.e2 = path_check(args.e2)
 args.pretrained_dir = path_check(args.pretrained_dir)
-
+assert(args.num_dec >= 1)
   
 if __name__ == "__main__":
-  # Some settings
-  SHOW_INTERVAL = 100
-  SAVE_INTERVAL = 2000
-
   # Set up directories and logs, etc.
   TIME_ID = time.strftime("%Y%m%d-%H%M")
   project_path = pjoin("../Experiments", TIME_ID + "_" + args.project_name)
@@ -607,7 +605,7 @@ if __name__ == "__main__":
         # logprint("E{}S{} grad x lr:\n{}".format(epoch, step, ave_grad), log)
       
       # Print training loss
-      if step % SHOW_INTERVAL == 0:
+      if step % args.show_interval == 0:
         if args.adv_train:
           if args.adv_train == 1:
             format_str = "E{}S{} | BE: {:.5f}({:.3f}) {:.5f}({:.3f}) | AdvBE: {:.5f}({:.3f}) | SE: {:.5f}({:.3f}) {:.5f}({:.3f}) | soft: {:.5f} {:.5f} tv: {:.5f} {:.5f} norm: {:.5f} {:.5f} p: {:.5f} {:.5f} {:.5f} {:.5f} ({:.3f}s/step)"
@@ -621,7 +619,7 @@ if __name__ == "__main__":
                 tvloss1.data.cpu().numpy(), tvloss2.data.cpu().numpy(),
                 img_norm1.data.cpu().numpy(), img_norm2.data.cpu().numpy(),
                 ploss1.data.cpu().numpy(), ploss2.data.cpu().numpy(), ploss3.data.cpu().numpy(), ploss4.data.cpu().numpy(),
-                (time.time()-t1)/SHOW_INTERVAL), log)
+                (time.time()-t1)/args.show_interval), log)
           
           elif args.adv_train == 2:
             format_str = "E{}S{} | BE: {:.5f}({:.3f}) AdvBE: {:.5f}({:.3f}) | DA_BE: {:.5f}({:.3f}) DA_AdvBE: {:.5f}({:.3f}) | SE: {:.5f}({:.3f}) {:.5f}({:.3f}) | soft: {:.5f} tv: {:.5f} norm: {:.5f} p: {:.5f} {:.5f} {:.5f} {:.5f} ({:.3f}s/step)"
@@ -632,7 +630,7 @@ if __name__ == "__main__":
                 loss_trans_AdvBE.data.cpu().numpy(), trainacc_DA_AdvBE, 
                 Shardloss.data.cpu().numpy(), trainacc_SE, Shardloss_DA.data.cpu().numpy(), trainacc_DA_SE, # cls loss for SE
                 softloss1.data.cpu().numpy(), tvloss1.data.cpu().numpy(), img_norm1.data.cpu().numpy(), ploss1.data.cpu().numpy(), ploss2.data.cpu().numpy(), ploss3.data.cpu().numpy(), ploss4.data.cpu().numpy(),
-                (time.time()-t1)/SHOW_INTERVAL), log)
+                (time.time()-t1)/args.show_interval), log)
           
           elif args.adv_train == 3:
             format_str1 = "E{}S{} | dec:"
@@ -649,7 +647,7 @@ if __name__ == "__main__":
             logprint(format_str.format(epoch, step,
                 *tmp1, *tmp2,
                 tvloss1.data.cpu().numpy(), imgnorm1.data.cpu().numpy(), ploss1.data.cpu().numpy(), ploss2.data.cpu().numpy(), ploss3.data.cpu().numpy(), ploss4.data.cpu().numpy(),
-                (time.time()-t1)/SHOW_INTERVAL), log)
+                (time.time()-t1)/args.show_interval), log)
             
         else:
           if args.mode in ["BD", "BDSE"]:
@@ -659,7 +657,7 @@ if __name__ == "__main__":
                 img_norm1.data.cpu().numpy(), img_norm2.data.cpu().numpy(),
                 hardloss1.data.cpu().numpy(), trainacc1, hardloss1_DA.data.cpu().numpy(), trainacc2, Shardloss1_DA.data.cpu().numpy(),
                 ploss1.data.cpu().numpy(), ploss2.data.cpu().numpy(), ploss3.data.cpu().numpy(), ploss4.data.cpu().numpy(),
-                (time.time()-t1)/SHOW_INTERVAL), log)
+                (time.time()-t1)/args.show_interval), log)
           
           elif args.mode == "SE":
             format_str = "E{}S{} loss: {:.3f} | soft: {:.5f} {:.5f} | tv: {:.5f} {:.5f} | hard: {:.5f}({:.4f}) {:.5f}({:.4f}) | f: {:.5f} {:.5f} | p: {:.5f} {:.5f} {:.5f} {:.5f} ({:.3f}s/step)"
@@ -668,11 +666,11 @@ if __name__ == "__main__":
                 hardloss1.data.cpu().numpy(), trainacc1, hardloss2.data.cpu().numpy(), trainacc2,
                 floss3.data.cpu().numpy(), floss4.data.cpu().numpy(), 
                 ploss1.data.cpu().numpy(), ploss2.data.cpu().numpy(), ploss3.data.cpu().numpy(), ploss4.data.cpu().numpy(), 
-                (time.time()-t1)/SHOW_INTERVAL), log)
+                (time.time()-t1)/args.show_interval), log)
         t1 = time.time()
       
       # Test and save models
-      if step % SAVE_INTERVAL == 0:
+      if step % args.save_interval == 0:
         if args.adv_train == 3:
           ae.dec = ae.d1; ae.small_enc = ae.se; ae.learned_trans = ae.defined_trans       
           ae.enc = ae.be
@@ -742,15 +740,9 @@ if __name__ == "__main__":
           torch.save(ae.learned_trans.state_dict(), pjoin(weights_path, "%s_LT_E%sS%s.pth" % (TIME_ID, epoch, step)))
           torch.save(ae.advbe.state_dict(), pjoin(weights_path, "%s_AdvBE_E%sS%s.pth" % (TIME_ID, epoch, step)))
         elif args.adv_train == 3:
-          torch.save(ae.d1.state_dict(), pjoin(weights_path, "%s_d1_E%sS%s_testacc1=%.4f.pth" % (TIME_ID, epoch, step, test_acc1)))
-          torch.save(ae.d2.state_dict(), pjoin(weights_path, "%s_d2_E%sS%s.pth" % (TIME_ID, epoch, step)))
-          torch.save(ae.d3.state_dict(), pjoin(weights_path, "%s_d3_E%sS%s.pth" % (TIME_ID, epoch, step)))
-          torch.save(ae.d4.state_dict(), pjoin(weights_path, "%s_d4_E%sS%s.pth" % (TIME_ID, epoch, step)))
-          torch.save(ae.d5.state_dict(), pjoin(weights_path, "%s_d5_E%sS%s.pth" % (TIME_ID, epoch, step)))
-          torch.save(ae.d6.state_dict(), pjoin(weights_path, "%s_d6_E%sS%s.pth" % (TIME_ID, epoch, step)))
-          torch.save(ae.d7.state_dict(), pjoin(weights_path, "%s_d7_E%sS%s.pth" % (TIME_ID, epoch, step)))
-          torch.save(ae.d8.state_dict(), pjoin(weights_path, "%s_d8_E%sS%s.pth" % (TIME_ID, epoch, step)))
-          torch.save(ae.d9.state_dict(), pjoin(weights_path, "%s_d9_E%sS%s.pth" % (TIME_ID, epoch, step)))
           torch.save(ae.se.state_dict(), pjoin(weights_path, "%s_se_E%sS%s_testacc=%.4f.pth" % (TIME_ID, epoch, step, test_acc)))
-  
+          torch.save(ae.d1.state_dict(), pjoin(weights_path, "%s_d1_E%sS%s_testacc1=%.4f.pth" % (TIME_ID, epoch, step, test_acc1)))
+          for di in range(2, args.num_dec+1):
+            dec = eval("ae.d" + str(di))
+            torch.save(dec.state_dict(), pjoin(weights_path, "%s_d%s_E%sS%s.pth" % (TIME_ID, di, epoch, step)))
   log.close()
