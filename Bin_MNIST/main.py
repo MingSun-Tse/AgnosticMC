@@ -588,7 +588,7 @@ if __name__ == "__main__":
           # total loss
           loss = tvloss1 + imgnorm1 + tvloss2 + imgnorm2 + \
                   ploss1 + ploss2 + ploss3 + ploss4 + \
-                  hardloss1 + hardloss1_DT + hardloss2 \
+                  softloss1 + softloss2 + hardloss1 + hardloss1_DT + hardloss2 \
                   + args.lw_adv / hardloss_dse
           loss.backward()
           optimizer.step()
@@ -660,7 +660,7 @@ if __name__ == "__main__":
           ## total loss
           loss = tvloss1 + imgnorm1 + tvloss2 + imgnorm2 + \
                   ploss1 + ploss2 + ploss3 + ploss4 + \
-                  hardloss1 + hardloss1_DT + hardloss2 \
+                  softloss1 + softloss2 + hardloss1 + hardloss1_DT + hardloss2 \
                   + advloss
           loss.backward()
           optimizer.step()
@@ -689,7 +689,6 @@ if __name__ == "__main__":
             if param.requires_grad:
               param.data = ema(name, param.data)
         
-        
       # Print and check the gradient
       # if step % 2000 == 0:
         # ave_grad = []
@@ -703,6 +702,8 @@ if __name__ == "__main__":
         # ave_grad = "".join(ave_grad)
         # logprint("E{}S{} grad x lr:\n{}".format(epoch, step, ave_grad))
       
+      # Check decoder: If decoder does not converge, reinitialize it
+      
       
       # Test and save models
       if step % args.save_interval == 0:
@@ -715,8 +716,8 @@ if __name__ == "__main__":
         for i in range(len(test_codes)):
           x = test_codes[i].cuda()
           if args.adv_train in [3, 4]:
-            for di in range(args.num_dec):
-              dec = eval("ae.d%s" % (di+1))
+            for di in range(1, args.num_dec+1):
+              dec = eval("ae.d%s" % di)
               img1 = dec(x)
               out_img1_path = pjoin(rec_img_path, "%s_E%sS%s_imgrec%s_label=%s_d%s.jpg" % (TIME_ID, epoch, step, i, test_labels[i], di))
               vutils.save_image(img1.data.cpu().float(), out_img1_path)
