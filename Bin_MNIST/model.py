@@ -520,7 +520,7 @@ class Transform8(nn.Module): # random transform combination
 Encoder = LeNet5
 Decoder = DLeNet5
 SmallEncoder = SmallLeNet5
-AdvEncoder = LeNet5_drop
+AdvEncoder = LeNet5_drop # deprecated
 
 class AutoEncoder_BD(nn.Module):
   def __init__(self, e1=None, d=None, e2=None):
@@ -670,12 +670,29 @@ class AutoEncoder_BDSE_GAN3(nn.Module):
         pretrained_model = [x for x in os.listdir(args.pretrained_dir) if "_d%s_" % di in x and args.pretrained_timeid in x] # the number of pretrained decoder should be like "SERVER218-20190313-1233_d3_E0S0.pth"
         assert(len(pretrained_model) == 1)
         pretrained_model = pretrained_model[0]
-      self.__setattr__("d"+str(di), Decoder(pretrained_model, fixed=False))
-    
+      self.__setattr__("d" + str(di), Decoder(pretrained_model, fixed=False))
+
+class AutoEncoder_BDSE_GAN4(nn.Module):
+  def __init__(self, args):
+    super(AutoEncoder_BDSE_GAN4, self).__init__()
+    self.be = Encoder(args.e1, fixed=True).eval()
+    self.defined_trans = Transform8()
+    for di in range(1, args.num_dec+1):
+      pretrained_model = None
+      if args.pretrained_dir:
+        assert(args.pretrained_timeid != None)
+        pretrained_model = [x for x in os.listdir(args.pretrained_dir) if "_d%s_" % di in x and args.pretrained_timeid in x] # the number of pretrained decoder should be like "SERVER218-20190313-1233_d3_E0S0.pth"
+        assert(len(pretrained_model) == 1)
+        pretrained_model = pretrained_model[0]
+      self.__setattr__("d" + str(di), Decoder(pretrained_model, fixed=False))
+    for sei in range(1, args.num_se+1):
+      self.__setattr__("se" + str(sei), SmallEncoder(None, fixed=False))
+      
 AutoEncoders = {
 "BD": AutoEncoder_BD,
 "SE": AutoEncoder_SE,
 "BDSE": AutoEncoder_BDSE_Trans,
-"BDSE_GAN": AutoEncoder_BDSE_GAN3,
+"BDSE_GAN3": AutoEncoder_BDSE_GAN3,
+"BDSE_GAN4": AutoEncoder_BDSE_GAN4,
 }
   
