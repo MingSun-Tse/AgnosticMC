@@ -246,6 +246,9 @@ class LearnedTransform(nn.Module):
     y = self.relu(self.conv42(y))
     x = (self.relu(self.conv43(y)) + x) / 2
     return x
+
+class (nn
+
     
 # ---------------------------------------------------
 class Transform1(nn.Module):
@@ -362,7 +365,7 @@ class Transform3(nn.Module): # 8-direction translation
 class Transform4(nn.Module): # rand translation
   def __init__(self):
     super(Transform4, self).__init__()
-    self.conv_trans  = nn.Conv2d(1, 1, kernel_size=(5, 5), stride=(1, 1), padding=(2, 2), bias=True)
+    self.conv_trans  = nn.Conv2d(1, 1, kernel_size=(5, 5), stride=(1, 1), padding=(2, 2), bias=False)
     self.one_hot2 = OneHotCategorical(torch.Tensor([1/24., 1/24., 1/24., 1/24., 1/24.,
                                                     1/24., 1/24., 1/24., 1/24., 1/24.,
                                                     1/24., 1/24., 0.000, 1/24., 1/24.,
