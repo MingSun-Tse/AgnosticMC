@@ -247,9 +247,6 @@ class LearnedTransform(nn.Module):
     x = (self.relu(self.conv43(y)) + x) / 2
     return x
 
-class (nn
-
-    
 # ---------------------------------------------------
 class Transform1(nn.Module):
   def __init__(self):

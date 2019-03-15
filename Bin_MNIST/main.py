@@ -44,7 +44,7 @@ parser.add_argument('--e2',  type=str,   default=None)
 parser.add_argument('--pretrained_dir',   type=str, default=None, help="the directory of pretrained decoder models")
 parser.add_argument('--pretrained_timeid',type=str, default=None, help="the timeid of the pretrained models.")
 parser.add_argument('--num_dec', type=int, default=9)
-parser.add_argument('--num_se', type=int, default=3)
+parser.add_argument('--num_se', type=int, default=1)
 parser.add_argument('--t',   type=str,   default=None)
 parser.add_argument('--gpu', type=int,   default=0)
 parser.add_argument('--lr',  type=float, default=1e-3)
@@ -277,7 +277,7 @@ if __name__ == "__main__":
         label = onehot_label.data.numpy().argmax(axis=1)
         label = torch.from_numpy(label).long()
       else:
-        x = ae.enc(img.cuda()) / args.Temp
+        x = ae.be(img.cuda()) / args.Temp
       prob_gt = F.softmax(x, dim=1) # prob, ground truth
       label = label.cuda()
       
