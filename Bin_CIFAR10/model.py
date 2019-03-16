@@ -5,9 +5,11 @@ import torch.nn as nn
 import torch
 from torch.utils.serialization import load_lua
 from torch.distributions.one_hot_categorical import OneHotCategorical
+from torchvision import transforms
 import torch.nn.functional as F
 import math
 import vgg
+
 
 pjoin = os.path.join
 
@@ -129,6 +131,20 @@ class SmallVGG19(nn.Module):
     x = self.classifier(x)
     return x
 
+
+class Normalize(nn.Module):
+  def __init__(self):
+    super(Normalize, self).__init__()
+    self.normalize = nn.Conv2d(3, 3, kernel_size=(1, 1), stride=(1,1), bias=True, groups=3)
+    self.normalize.requires_grad = False
+    self.normalize.weight = nn.Parameter(torch.from_numpy(np.array(
+                                    [[[[1/0.229]]],
+                                     [[[1/0.224]]],
+                                     [[[1/0.225]]]])).float()) # 3x1x1x1
+    self.normalize.bias = nn.Parameter(torch.from_numpy(np.array(
+                                  [-0.485/0.229, -0.456/0.224, -0.406/0.225])).float())
+  def forward(self, x):
+    return self.normalize(x)
 class DVGG19(nn.Module):
   def __init__(self, model=None, fixed=None):
     super(DVGG19, self).__init__()
@@ -141,6 +157,7 @@ class DVGG19(nn.Module):
       nn.ReLU(True),
     )
     self.features = make_layers_dec(cfg["Dec"])
+
     if model:
      checkpoint = torch.load(model)
      self.load_state_dict(checkpoint)
@@ -150,6 +167,7 @@ class DVGG19(nn.Module):
           n = m.kernel_size[0] * m.kernel_size[1] * m.out_channels
           m.weight.data.normal_(0, math.sqrt(2. / n))
           m.bias.data.zero_()
+
     if fixed:
       for param in self.parameters():
           param.requires_grad = False
