@@ -52,17 +52,13 @@ parser.add_argument('--b1',  type=float, default=5e-4, help='adam: decay of firs
 parser.add_argument('--b2',  type=float, default=5e-4, help='adam: decay of second order momentum of gradient')
 # ----------------------------------------------------------------
 # various losses
-parser.add_argument('--floss_weight',    type=float, default=1)
-parser.add_argument('--ploss_weight',    type=float, default=2)
-parser.add_argument('--softloss_weight', type=float, default=10) # According to the paper KD, the soft target loss weight should be considarably larger than that of hard target loss.
-parser.add_argument('--hardloss_weight', type=float, default=1)
-parser.add_argument('--tvloss_weight',   type=float, default=1e-6)
-parser.add_argument('--normloss_weight', type=float, default=1e-4)
-parser.add_argument('--daloss_weight',   type=float, default=10)
-parser.add_argument('--advloss_weight',  type=float, default=20)
+parser.add_argument('--lw_perc', type=float, default=2, help="perceptual loss")
+parser.add_argument('--lw_soft', type=float, default=10) # According to the paper KD, the soft target loss weight should be considarably larger than that of hard target loss.
+parser.add_argument('--lw_hard', type=float, default=1)
+parser.add_argument('--lw_tv',   type=float, default=1e-6)
+parser.add_argument('--lw_norm', type=float, default=1e-4)
+parser.add_argument('--lw_DA',   type=float, default=10)
 parser.add_argument('--lw_adv',  type=float, default=0.5)
-parser.add_argument('--floss_lw', type=str, default="1-1-1-1-1-1-1")
-parser.add_argument('--ploss_lw', type=str, default="1-1-1-1-1-1-1")
 # ----------------------------------------------------------------
 parser.add_argument('-b', '--batch_size', type=int, default=100)
 parser.add_argument('-p', '--project_name', type=str, default="test")
@@ -74,7 +70,7 @@ parser.add_argument('--num_class', type=int, default=10)
 parser.add_argument('--use_pseudo_code', action="store_false")
 parser.add_argument('--begin', type=float, default=25)
 parser.add_argument('--end',   type=float, default=20)
-parser.add_argument('--Temp',  type=float, default=1, help="the Tempature in KD")
+parser.add_argument('--temp',  type=float, default=1, help="the tempature in KD")
 parser.add_argument('--adv_train', type=int, default=0)
 parser.add_argument('--alpha', type=float, default=1, help="a factor to balance the GAN-style loss")
 parser.add_argument('--beta', type=float, default=1e-6, help="a factor to balance the GAN-style loss")
@@ -165,10 +161,6 @@ if __name__ == "__main__":
   # Print setting for later check
   logprint(args._get_kwargs())
   
-  # Parse to get stage loss weight
-  floss_lw = [float(x) for x in args.floss_lw.split("-")]
-  ploss_lw = [float(x) for x in args.ploss_lw.split("-")]
-  
   # Optimization
   if args.adv_train == 4:
     optimizer_se  = [] 
@@ -200,11 +192,11 @@ if __name__ == "__main__":
       if args.use_pseudo_code:
         onehot_label = one_hot.sample_n(args.batch_size)
         x = torch.randn([args.batch_size, args.num_class]) * (np.random.rand() * 5.0 + 2.0) + onehot_label * np.random.randint(args.end, args.begin) # logits
-        x = x.cuda() / args.Temp
+        x = x.cuda() / args.temp
         label = onehot_label.data.numpy().argmax(axis=1)
         label = torch.from_numpy(label).long()
       else:
-        x = ae.be(img.cuda()) / args.Temp
+        x = ae.be(img.cuda()) / args.temp
       prob_gt = F.softmax(x, dim=1) # prob, ground truth
       label = label.cuda()
         
@@ -220,26 +212,26 @@ if __name__ == "__main__":
           imgrec.append(imgrec1); imgrec_DT.append(imgrec1_DT) # for SE
           ave_imgrec += imgrec1 # to get average img
           
-          tvloss1 = args.tvloss_weight * (torch.sum(torch.abs(imgrec1[:, :, :, :-1] - imgrec1[:, :, :, 1:])) + 
+          tvloss1 = args.lw_tv * (torch.sum(torch.abs(imgrec1[:, :, :, :-1] - imgrec1[:, :, :, 1:])) + 
                                           torch.sum(torch.abs(imgrec1[:, :, :-1, :] - imgrec1[:, :, 1:, :])))
-          tvloss2 = args.tvloss_weight * (torch.sum(torch.abs(imgrec2[:, :, :, :-1] - imgrec2[:, :, :, 1:])) + 
+          tvloss2 = args.lw_tv * (torch.sum(torch.abs(imgrec2[:, :, :, :-1] - imgrec2[:, :, :, 1:])) + 
                                           torch.sum(torch.abs(imgrec2[:, :, :-1, :] - imgrec2[:, :, 1:, :])))
-          imgnorm1 = torch.pow(torch.norm(imgrec1, p=6), 6) * args.normloss_weight
-          imgnorm2 = torch.pow(torch.norm(imgrec2, p=6), 6) * args.normloss_weight
+          imgnorm1 = torch.pow(torch.norm(imgrec1, p=6), 6) * args.lw_norm
+          imgnorm2 = torch.pow(torch.norm(imgrec2, p=6), 6) * args.lw_norm
           
           ploss = 0
           ploss_print = []
           for i in range(len(feats1)-1):
-            ploss_print.append(nn.MSELoss()(feats2[i], feats1[i].data) * args.ploss_weight)
+            ploss_print.append(nn.MSELoss()(feats2[i], feats1[i].data) * args.lw_perc)
             ploss += ploss_print[-1]
             
-          logprob1 = F.log_softmax(logits1/args.Temp, dim=1)
-          logprob2 = F.log_softmax(logits2/args.Temp, dim=1)
-          softloss1 = nn.KLDivLoss()(logprob1, prob_gt.data) * (args.Temp*args.Temp) * args.softloss_weight
-          softloss2 = nn.KLDivLoss()(logprob2, prob_gt.data) * (args.Temp*args.Temp) * args.softloss_weight
-          hardloss1 = nn.CrossEntropyLoss()(logits1, label.data) * args.hardloss_weight
-          hardloss2 = nn.CrossEntropyLoss()(logits2, label.data) * args.hardloss_weight
-          hardloss1_DT = nn.CrossEntropyLoss()(logits1_DT, label.data) * args.daloss_weight
+          logprob1 = F.log_softmax(logits1/args.temp, dim=1)
+          logprob2 = F.log_softmax(logits2/args.temp, dim=1)
+          softloss1 = nn.KLDivLoss()(logprob1, prob_gt.data) * (args.temp*args.temp) * args.lw_soft
+          softloss2 = nn.KLDivLoss()(logprob2, prob_gt.data) * (args.temp*args.temp) * args.lw_soft
+          hardloss1 = nn.CrossEntropyLoss()(logits1, label.data) * args.lw_hard
+          hardloss2 = nn.CrossEntropyLoss()(logits2, label.data) * args.lw_hard
+          hardloss1_DT = nn.CrossEntropyLoss()(logits1_DT, label.data) * args.lw_DA
           pred = logits1.detach().max(1)[1]; trainacc = pred.eq(label.view_as(pred)).sum().cpu().data.numpy() / float(args.batch_size)
           hardloss_dec.append(hardloss1.data.cpu().numpy()); trainacc_dec.append(trainacc)
           
@@ -247,7 +239,7 @@ if __name__ == "__main__":
           for sei in range(1, args.num_se+1):
             se = eval("ae.se" + str(sei))
             logits_dse = se(imgrec1)
-            advloss += args.lw_adv / nn.CrossEntropyLoss()(logits_dse, label.data) * args.hardloss_weight
+            advloss += args.lw_adv / nn.CrossEntropyLoss()(logits_dse, label.data) * args.lw_hard
           
           ## total loss
           loss = tvloss1 + imgnorm1 + tvloss2 + imgnorm2 + \
@@ -271,8 +263,8 @@ if __name__ == "__main__":
           for di in range(args.num_dec):
             logits = se(imgrec[di].detach())
             logits_DT = se(imgrec_DT[di].detach())
-            hardloss = nn.CrossEntropyLoss()(logits, label.data) * args.hardloss_weight
-            hardloss_DT = nn.CrossEntropyLoss()(logits_DT, label.data) * args.daloss_weight
+            hardloss = nn.CrossEntropyLoss()(logits, label.data) * args.lw_hard
+            hardloss_DT = nn.CrossEntropyLoss()(logits_DT, label.data) * args.lw_DA
             loss_se += hardloss + hardloss_DT
             pred = logits.detach().max(1)[1]; trainacc = pred.eq(label.view_as(pred)).sum().cpu().data.numpy() / float(args.batch_size)
             hardloss_se.append(hardloss.data.cpu().numpy()); trainacc_se.append(trainacc)
@@ -321,8 +313,8 @@ if __name__ == "__main__":
           Slogprob1 = F.log_softmax(Slogits, dim=1)
           
           # code reconstruction loss
-          softloss1_  = nn.KLDivLoss()(logprob1,  prob_gt.data) * args.softloss_weight
-          Ssoftloss1_ = nn.KLDivLoss()(Slogprob1, prob_gt.data) * args.softloss_weight
+          softloss1_  = nn.KLDivLoss()(logprob1,  prob_gt.data) * args.lw_soft
+          Ssoftloss1_ = nn.KLDivLoss()(Slogprob1, prob_gt.data) * args.lw_soft
           
           softloss1_test  +=  softloss1_.data.cpu().numpy()
           Ssoftloss1_test += Ssoftloss1_.data.cpu().numpy()
