@@ -214,8 +214,8 @@ if __name__ == "__main__":
         for di in range(1, args.num_dec+1):
           dec = eval("ae.d" + str(di)); optimizer = optimizer_dec[di-1]; ema = ema_dec[di-1]
           dec.zero_grad()
-          imgrec1 = dec(x);       logits1 = ae.be(tensor_normalize(imgrec1)) # feats1 = ae.be.forward_branch(imgrec1); logits1 = feats1[-1]
-          imgrec2 = dec(logits1); logits2 = ae.be(tensor_normalize(imgrec2)) # feats2 = ae.be.forward_branch(imgrec2); logits2 = feats2[-1]
+          imgrec1 = dec(x);       feats1 = ae.be.forward_branch(tensor_normalize(imgrec1)); logits1 = feats1[-1]
+          imgrec2 = dec(logits1); feats2 = ae.be.forward_branch(tensor_normalize(imgrec2)); logits2 = feats2[-1]
           imgrec1_DT = ae.defined_trans(imgrec1); logits1_DT = ae.be(tensor_normalize(imgrec1_DT)) # DT: defined transform
           imgrec.append(imgrec1); imgrec_DT.append(imgrec1_DT) # for SE
           ave_imgrec += imgrec1 # to get average img
@@ -226,12 +226,13 @@ if __name__ == "__main__":
                                           torch.sum(torch.abs(imgrec2[:, :, :-1, :] - imgrec2[:, :, 1:, :])))
           imgnorm1 = torch.pow(torch.norm(imgrec1, p=6), 6) * args.normloss_weight
           imgnorm2 = torch.pow(torch.norm(imgrec2, p=6), 6) * args.normloss_weight
-
-          # ploss1 = nn.MSELoss()(feats2[0], feats1[0].data) * args.ploss_weight * ploss_lw[0]
-          # ploss2 = nn.MSELoss()(feats2[1], feats1[1].data) * args.ploss_weight * ploss_lw[1]
-          # ploss3 = nn.MSELoss()(feats2[2], feats1[2].data) * args.ploss_weight * ploss_lw[2]
-          # ploss4 = nn.MSELoss()(feats2[3], feats1[3].data) * args.ploss_weight * ploss_lw[3]
           
+          ploss = 0
+          ploss_print = []
+          for i in range(len(feats1)-1):
+            ploss_print.append(nn.MSELoss()(feats2[i], feats1[i].data) * args.ploss_weight)
+            ploss += ploss_print[-1]
+            
           logprob1 = F.log_softmax(logits1/args.Temp, dim=1)
           logprob2 = F.log_softmax(logits2/args.Temp, dim=1)
           softloss1 = nn.KLDivLoss()(logprob1, prob_gt.data) * (args.Temp*args.Temp) * args.softloss_weight
@@ -250,9 +251,9 @@ if __name__ == "__main__":
           
           ## total loss
           loss = tvloss1 + imgnorm1 + tvloss2 + imgnorm2 + \
-                  softloss1 + softloss2 + hardloss1 + hardloss1_DT + hardloss2 \
-                  + advloss
-                  # ploss1 + ploss2 + ploss3 + ploss4 + \
+                  ploss + \
+                  softloss1 + softloss2 + hardloss1 + hardloss1_DT + hardloss2 + \
+                  advloss
           
           loss.backward()
           optimizer.step()
@@ -356,19 +357,22 @@ if __name__ == "__main__":
             format_str1 = "E{}S{} | dec:"
             format_str2 = " {:.4f}({:.3f})" * args.num_dec
             format_str3 = " | se:"
-            format_str4 = " | soft: {:.4f} tv: {:.4f} norm: {:.4f} ({:.3f}s/step)" # p: {:.4f} {:.4f} {:.4f} {:.4f}
-            format_str = "".join([format_str1, format_str2, format_str3, format_str2, format_str4])
+            format_str4 = " | soft: {:.4f} tv: {:.4f} norm: {:.4f} ({:.3f}s/step) p:"
+            format_str5 = " {:.4f}" * len(ploss_print)
+            format_str = "".join([format_str1, format_str2, format_str3, format_str2, format_str4, format_str5])
             tmp1 = []; tmp2 = []
             for i in range(args.num_dec):
               tmp1.append(hardloss_dec[i])
               tmp1.append(trainacc_dec[i])
               tmp2.append(hardloss_se[i])
               tmp2.append(trainacc_se[i])
+            tmp3 = [x.data.cpu().numpy() for x in ploss_print]
             logprint(format_str.format(epoch, step,
                 *tmp1, *tmp2,
                 softloss1.cpu().item(), tvloss1.data.cpu().numpy(), imgnorm1.data.cpu().numpy(),
+                *tmp3,
                 (time.time()-t1)/args.show_interval))
-            # ploss1.data.cpu().numpy(), ploss2.data.cpu().numpy(), ploss3.data.cpu().numpy(), ploss4.data.cpu().numpy(),
+
         t1 = time.time()
       
       

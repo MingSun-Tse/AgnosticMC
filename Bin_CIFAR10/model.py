@@ -80,6 +80,15 @@ class VGG19(nn.Module):
       nn.ReLU(True),
       nn.Linear(512, 10),
     )
+    # get layers for forward_branch
+    self.branch_layer = [0] # Convx_1. The first layer, i.e., Conv1_1 is included in default.
+    self.features_num_module = len(self.features.module)
+    
+    for i in range(1, self.features_num_module):
+      m = self.features.module[i-1]
+      if isinstance(m, nn.MaxPool2d):
+        self.branch_layer.append(i)
+    
     if model:
      checkpoint = torch.load(model)
      self.load_state_dict(checkpoint["state_dict"])
@@ -91,14 +100,27 @@ class VGG19(nn.Module):
           m.bias.data.zero_()
     if fixed:
       for param in self.parameters():
-          param.requires_grad = False
-          
+        param.requires_grad = False
+    
   def forward(self, x):
     x = self.features(x)
     x = x.view(x.size(0), -1)
     x = self.classifier(x)
     return x
-
+  
+  def forward_branch(self, x):
+    y = []
+    for i in range(self.features_num_module):
+      m = self.features.module[i]
+      x = m(x)
+      if i in self.branch_layer:
+        y.append(x)
+    x = x.view(x.size(0), -1)
+    x = self.classifier(x)
+    y.append(x)
+    return y
+    
+    
 class SmallVGG19(nn.Module):
   def __init__(self, model=None, fixed=None):
     super(SmallVGG19, self).__init__()
@@ -145,6 +167,8 @@ class Normalize(nn.Module):
                                   [-0.485/0.229, -0.456/0.224, -0.406/0.225])).float())
   def forward(self, x):
     return self.normalize(x)
+    
+    
 class DVGG19(nn.Module):
   def __init__(self, model=None, fixed=None):
     super(DVGG19, self).__init__()
@@ -177,6 +201,7 @@ class DVGG19(nn.Module):
     x = x.view(x.size(0), 512, 1, 1)
     x = self.features(x)
     return x
+    
 # ---------------------------------------------------
 class Transform2(nn.Module): # drop out
   def __init__(self):
