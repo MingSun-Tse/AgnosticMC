@@ -117,7 +117,10 @@ def make_layers_dec(cfg, batch_norm=False):
       if batch_norm:
         layers += [conv2d, nn.BatchNorm2d(v), nn.ReLU(inplace=True)]
       else:
-        layers += [conv2d, nn.ReLU(inplace=True)]
+        if v == cfg[-1]:
+          layers += [conv2d, nn.Sigmoid()] # normalize output image to [0, 1]
+        else: 
+          layers += [conv2d, nn.ReLU(inplace=True)]
       in_channels = v
   return nn.Sequential(*layers)
   

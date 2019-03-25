@@ -53,13 +53,14 @@ parser.add_argument('--b1',  type=float, default=5e-4, help='adam: decay of firs
 parser.add_argument('--b2',  type=float, default=5e-4, help='adam: decay of second order momentum of gradient')
 # ----------------------------------------------------------------
 # various losses
-parser.add_argument('--lw_perc', type=float, default=2, help="perceptual loss")
+parser.add_argument('--lw_perc', type=float, default=1, help="perceptual loss")
 parser.add_argument('--lw_soft', type=float, default=10) # According to the paper KD, the soft target loss weight should be considarably larger than that of hard target loss.
 parser.add_argument('--lw_hard', type=float, default=1)
 parser.add_argument('--lw_tv',   type=float, default=1e-6)
 parser.add_argument('--lw_norm', type=float, default=1e-4)
 parser.add_argument('--lw_DA',   type=float, default=10)
 parser.add_argument('--lw_adv',  type=float, default=0.5)
+parser.add_argument('--lw_class',  type=float, default=10)
 # ----------------------------------------------------------------
 parser.add_argument('-b', '--batch_size', type=int, default=256)
 parser.add_argument('-p', '--project_name', type=str, default="test")
@@ -69,15 +70,16 @@ parser.add_argument('--num_epoch', type=int, default=96)
 parser.add_argument('--debug', action="store_true")
 parser.add_argument('--num_class', type=int, default=10)
 parser.add_argument('--use_pseudo_code', action="store_false")
-parser.add_argument('--begin', type=float, default=200)
-parser.add_argument('--end',   type=float, default=180)
+parser.add_argument('--begin', type=float, default=25)
+parser.add_argument('--end',   type=float, default=20)
 parser.add_argument('--temp',  type=float, default=1, help="the tempature in KD")
 parser.add_argument('--adv_train', type=int, default=0)
-parser.add_argument('--G_update_interval', type=int, default=1)
 parser.add_argument('--ema_factor', type=float, default=0.9, help="Exponential Moving Average") 
-parser.add_argument('--show_interval', type=int, default=50, help="the interval to print logs")
-parser.add_argument('--save_interval', type=int, default=1000, help="the interval to save models")
+parser.add_argument('--show_interval', type=int, default=10, help="the interval to print logs")
+parser.add_argument('--save_interval', type=int, default=100, help="the interval to save sample images")
+parser.add_argument('--test_interval', type=int, default=1000, help="the interval to test and save models")
 parser.add_argument('--gray', action="store_true")
+parser.add_argument('--use_ave_img', action="store_true")
 args = parser.parse_args()
 
 # Update and check args
@@ -164,7 +166,7 @@ if __name__ == "__main__":
   onehot_label = torch.eye(args.num_class)
   test_codes = torch.randn([args.num_class, args.num_class]) * 5.0 + onehot_label * args.begin
   test_labels = onehot_label.data.numpy().argmax(axis=1)
-  np.save(pjoin(rec_img_path, "test_codes.npy"), test_codes.data.cpu().numpy())
+  # np.save(pjoin(rec_img_path, "test_codes.npy"), test_codes.data.cpu().numpy())
   
   # Print setting for later check
   logprint(args._get_kwargs())
@@ -255,11 +257,16 @@ if __name__ == "__main__":
             
           logprob1 = F.log_softmax(logits1/args.temp, dim=1)
           # logprob2 = F.log_softmax(logits2/args.temp, dim=1)
-          softloss1 = nn.KLDivLoss()(logprob1, prob_gt.data) * (args.temp*args.temp) * args.lw_soft
+          # softloss1 = nn.KLDivLoss()(logprob1, prob_gt.data) * (args.temp*args.temp) * args.lw_soft
           # softloss2 = nn.KLDivLoss()(logprob2, prob_gt.data) * (args.temp*args.temp) * args.lw_soft
           hardloss1 = nn.CrossEntropyLoss()(logits1, label.data) * args.lw_hard
           # hardloss2 = nn.CrossEntropyLoss()(logits2, label.data) * args.lw_hard
           hardloss1_DT = nn.CrossEntropyLoss()(logits1_DT, label.data) * args.lw_DA
+          
+          class_loss = 0
+          for i in range(args.batch_size):
+            class_loss += -logits1[i, label[i]] * args.lw_class
+          
           pred = logits1.detach().max(1)[1]; trainacc = pred.eq(label.view_as(pred)).sum().cpu().data.numpy() / float(args.batch_size)
           hardloss_dec.append(hardloss1.data.cpu().numpy()); trainacc_dec.append(trainacc)
           
@@ -270,19 +277,18 @@ if __name__ == "__main__":
             advloss += args.lw_adv / nn.CrossEntropyLoss()(logits_dse, label.data)
           
           ## total loss
-          loss = tvloss1 + imgnorm1 + \
-                  ploss + \
-                  softloss1 + hardloss1 + hardloss1_DT + \
-                  advloss
+          loss = class_loss + \
+                  hardloss1 + hardloss1_DT
 
           dec.zero_grad()
-          loss.backward(retain_graph=True)
+          loss.backward(retain_graph=args.use_ave_img)
         
         # average image loss
-        ave_imgrec /= args.num_dec
-        logits_ave = ae.be(ave_imgrec)
-        hardloss_ave = nn.CrossEntropyLoss()(logits_ave, label.data) * args.lw_hard
-        hardloss_ave.backward()
+        if args.use_ave_img:
+          ave_imgrec /= args.num_dec
+          logits_ave = ae.be(ave_imgrec)
+          hardloss_ave = nn.CrossEntropyLoss()(logits_ave, label.data) * args.lw_hard
+          hardloss_ave.backward()
         for di in range(1, args.num_dec+1):
           dec = eval("ae.d" + str(di)); optimizer = optimizer_dec[di-1]; ema = ema_dec[di-1]
           optimizer.step()
@@ -297,8 +303,8 @@ if __name__ == "__main__":
           se.zero_grad()
           loss_se = 0
           for di in range(args.num_dec):
-            logits = se(imgrec[di].detach())
-            logits_DT = se(imgrec_DT[di].detach())
+            logits = se(tensor_normalize(imgrec[di].detach()))
+            logits_DT = se(tensor_normalize(imgrec_DT[di].detach()))
             hardloss = nn.CrossEntropyLoss()(logits, label.data) * args.lw_hard
             hardloss_DT = nn.CrossEntropyLoss()(logits_DT, label.data) * args.lw_DA
             loss_se += hardloss + hardloss_DT
@@ -310,12 +316,11 @@ if __name__ == "__main__":
             if param.requires_grad:
               param.data = ema(name, param.data)
       
-      # Test and save models
+      # Save sample images
       if step % args.save_interval == 0:
-        if args.adv_train in [3, 4]:
-          ae.dec = ae.d1
-          ae.small_enc = ae.se1
-          ae.enc = ae.be
+        ae.dec = ae.d1
+        ae.small_enc = ae.se1
+        ae.enc = ae.be
         ae.eval()
         # save some test images
         for i in range(len(test_codes)):
@@ -326,44 +331,27 @@ if __name__ == "__main__":
             img1 = dec(x)
             out_img1_path = pjoin(rec_img_path, "%s_E%sS%s_imgrec%s_label=%s_d%s.jpg" % (TIME_ID, epoch, step, i, test_labels[i], di))
             vutils.save_image(img1.data.cpu().float(), out_img1_path)
-        
+      
+      # Test and save models
+      if step % args.test_interval == 0:
+        ae.dec = ae.d1
+        ae.small_enc = ae.se1
+        ae.enc = ae.be
+        ae.eval()
         # test with the true logits generated from test set
         test_loader = torch.utils.data.DataLoader(data_test, batch_size=100, shuffle=False, **kwargs)
-        softloss1_test = Ssoftloss1_test = test_acc1 = Stest_acc = test_acc = cnt = 0
+        test_acc = 0
         for i, (img, label) in enumerate(test_loader):
-          x = ae.enc(img.cuda())
           label = label.cuda()
-          prob_gt = F.softmax(x, dim=1)
-          
-          # forward
-          img_rec1 = ae.dec(x); logits1 = ae.enc(img_rec1); Slogits = ae.small_enc(img_rec1)
-          logprob1  = F.log_softmax(logits1, dim=1)
-          Slogprob1 = F.log_softmax(Slogits, dim=1)
-          
-          # code reconstruction loss
-          softloss1_  = nn.KLDivLoss()(logprob1,  prob_gt.data) * args.lw_soft
-          Ssoftloss1_ = nn.KLDivLoss()(Slogprob1, prob_gt.data) * args.lw_soft
-          
-          softloss1_test  +=  softloss1_.data.cpu().numpy()
-          Ssoftloss1_test += Ssoftloss1_.data.cpu().numpy()
-          
-          # test cls accuracy
-          pred1 = logits1.detach().max(1)[1]; test_acc1 += pred1.eq(label.view_as(pred1)).sum().cpu().data.numpy()
-          Spred = Slogits.detach().max(1)[1]; Stest_acc += Spred.eq(label.view_as(Spred)).sum().cpu().data.numpy()
-          cnt += 1
-           
           # test acc for small enc
           pred = ae.small_enc(img.cuda()).detach().max(1)[1]
           test_acc += pred.eq(label.view_as(pred)).sum().cpu().data.numpy()
-        
-        softloss1_test  /= cnt; test_acc1 /= float(len(data_test))
-        Ssoftloss1_test /= cnt; Stest_acc /= float(len(data_test))
         test_acc /= float(len(data_test))
         
-        format_str = "E{}S{} | =======> Test softloss with real logits: BE: {:.5f}({:.3f}) SE: {:.5f}({:.3f}) | test accuracy on SE: {:.4f}"
-        logprint(format_str.format(epoch, step, softloss1_test, test_acc1, Ssoftloss1_test, Stest_acc, test_acc))
+        format_str = "E{}S{} | =======> Test softloss with real logits: test accuracy on SE: {:.4f}"
+        logprint(format_str.format(epoch, step, test_acc))
         torch.save(ae.se1.state_dict(), pjoin(weights_path, "%s_se_E%sS%s_testacc=%.4f.pth" % (TIME_ID, epoch, step, test_acc)))
-        torch.save(ae.d1.state_dict(), pjoin(weights_path, "%s_d1_E%sS%s_testacc1=%.4f.pth" % (TIME_ID, epoch, step, test_acc1)))
+        torch.save(ae.d1.state_dict(), pjoin(weights_path, "%s_d1_E%sS%s.pth" % (TIME_ID, epoch, step)))
         for di in range(2, args.num_dec+1):
           dec = eval("ae.d" + str(di))
           torch.save(dec.state_dict(), pjoin(weights_path, "%s_d%s_E%sS%s.pth" % (TIME_ID, di, epoch, step)))
@@ -375,7 +363,7 @@ if __name__ == "__main__":
             format_str1 = "E{}S{} | dec:"
             format_str2 = " {:.4f}({:.3f})" * args.num_dec
             format_str3 = " | se:"
-            format_str4 = " | soft: {:.4f} tv: {:.4f} norm: {:.4f} p:"
+            format_str4 = " | tv: {:.4f} norm: {:.4f} p:"
             format_str5 = " {:.4f}" * len(ploss_print)
             format_str6 = " ({:.3f}s/step)"
             format_str = "".join([format_str1, format_str2, format_str3, format_str2, format_str4, format_str5, format_str6])
@@ -388,7 +376,7 @@ if __name__ == "__main__":
             tmp3 = [x.data.cpu().numpy() for x in ploss_print]
             logprint(format_str.format(epoch, step,
                 *tmp1, *tmp2,
-                softloss1.cpu().item(), tvloss1.data.cpu().numpy(), imgnorm1.data.cpu().numpy(),
+                tvloss1.data.cpu().numpy(), imgnorm1.data.cpu().numpy(),
                 *tmp3,
                 (time.time()-t1)/args.show_interval))
 
