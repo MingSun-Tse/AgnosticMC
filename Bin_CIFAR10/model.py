@@ -1,12 +1,14 @@
 import torchvision.models as models
 import numpy as np
 import os
+import copy
 import torch.nn as nn
 import torch
 from torch.utils.serialization import load_lua
 from torch.distributions.one_hot_categorical import OneHotCategorical
 from torchvision import transforms
 import torch.nn.functional as F
+from torch.autograd import Variable
 import math
 import vgg
 
@@ -26,6 +28,58 @@ class EMA():
     self.shadow[name] = new_average.clone()
     return new_average
 
+    
+def preprocess_image(pil_im, resize_im=True):
+    """
+        Processes image for CNNs
+
+    Args:
+        PIL_img (PIL_img): Image to process
+        resize_im (bool): Resize to 224 or not
+    returns:
+        im_as_var (torch variable): Variable that contains processed float tensor
+    """
+    # mean and std list for channels (Imagenet)
+    mean = [0.485, 0.456, 0.406]
+    std = [0.229, 0.224, 0.225]
+    # Resize image
+    if resize_im:
+        pil_im.thumbnail((512, 512))
+    im_as_arr = np.float32(pil_im)
+    im_as_arr = im_as_arr.transpose(2, 0, 1)  # Convert array to D,W,H
+    # Normalize the channels
+    for channel, _ in enumerate(im_as_arr):
+        im_as_arr[channel] /= 255
+        im_as_arr[channel] -= mean[channel]
+        im_as_arr[channel] /= std[channel]
+    # Convert to float tensor
+    im_as_ten = torch.from_numpy(im_as_arr).float()
+    # Add one more channel to the beginning. Tensor shape = 1,3,224,224
+    im_as_ten.unsqueeze_(0)
+    # Convert to Pytorch variable
+    im_as_var = Variable(im_as_ten, requires_grad=True)
+    return im_as_var
+    
+def recreate_image(im_as_var):
+    """
+        Recreates images from a torch variable, sort of reverse preprocessing
+    Args:
+        im_as_var (torch variable): Image to recreate
+    returns:
+        recreated_im (numpy arr): Recreated image in array
+    """
+    reverse_mean = [-0.485, -0.456, -0.406]
+    reverse_std = [1/0.229, 1/0.224, 1/0.225]
+    recreated_im = copy.copy(im_as_var.data.numpy()[0])
+    for c in range(3):
+        recreated_im[c] /= reverse_std[c]
+        recreated_im[c] -= reverse_mean[c]
+    recreated_im[recreated_im > 1] = 1
+    recreated_im[recreated_im < 0] = 0
+    recreated_im = np.round(recreated_im * 255)
+
+    recreated_im = np.uint8(recreated_im).transpose(1, 2, 0)
+    return recreated_im
 # ---------------------------------------------------
 cfg = {
     'A': [64, 'M', 128, 'M', 256, 256, 'M', 512, 512, 'M', 512, 512, 'M'],
@@ -34,6 +88,7 @@ cfg = {
     'E': [64, 64, 'M', 128, 128, 'M', 256, 256, 256, 256, 'M', 512, 512, 512, 512, 'M', 512, 512, 512, 512, 'M'],
     'SE': [32, 32, 'M', 64, 64, 'M', 128, 128, 128, 128, 'M', 256, 256, 256, 256, 'M', 256, 256, 256, 256, 'M'],
     'Dec': ["Up", 512, 512, "Up", 512, 512, "Up", 256, 256, "Up", 128, 128, "Up", 64, 3],
+    'Dec_gray': ["Up", 512, 512, "Up", 512, 512, "Up", 256, 256, "Up", 128, 128, "Up", 64, 1],
 } # "M": maxpooling
 
 def make_layers(cfg, batch_norm=False):
@@ -158,19 +213,19 @@ class Normalize(nn.Module):
   def __init__(self):
     super(Normalize, self).__init__()
     self.normalize = nn.Conv2d(3, 3, kernel_size=(1, 1), stride=(1,1), bias=True, groups=3)
-    self.normalize.requires_grad = False
     self.normalize.weight = nn.Parameter(torch.from_numpy(np.array(
                                     [[[[1/0.229]]],
                                      [[[1/0.224]]],
                                      [[[1/0.225]]]])).float()) # 3x1x1x1
     self.normalize.bias = nn.Parameter(torch.from_numpy(np.array(
                                   [-0.485/0.229, -0.456/0.224, -0.406/0.225])).float())
+    self.normalize.requires_grad = False
   def forward(self, x):
     return self.normalize(x)
     
     
 class DVGG19(nn.Module):
-  def __init__(self, model=None, fixed=None):
+  def __init__(self, model=None, fixed=None, gray=False):
     super(DVGG19, self).__init__()
     self.classifier = nn.Sequential(
       nn.Linear(10, 512),
@@ -180,7 +235,8 @@ class DVGG19(nn.Module):
       nn.Linear(512, 512),
       nn.ReLU(True),
     )
-    self.features = make_layers_dec(cfg["Dec"])
+    self.gray = gray
+    self.features = make_layers_dec(cfg["Dec_gray"]) if gray else make_layers_dec(cfg["Dec"])
 
     if model:
      checkpoint = torch.load(model)
@@ -200,6 +256,7 @@ class DVGG19(nn.Module):
     x = self.classifier(x)
     x = x.view(x.size(0), 512, 1, 1)
     x = self.features(x)
+    x = torch.stack([x]*3, dim=1).squeeze(2) if self.gray else x
     return x
     
 # ---------------------------------------------------
@@ -328,7 +385,7 @@ class AutoEncoder_GAN4(nn.Module):
         pretrained_model = [x for x in os.listdir(args.pretrained_dir) if "_d%s_" % di in x and args.pretrained_timeid in x] # the number of pretrained decoder should be like "SERVER218-20190313-1233_d3_E0S0.pth"
         assert(len(pretrained_model) == 1)
         pretrained_model = pretrained_model[0]
-      self.__setattr__("d" + str(di), Dec(pretrained_model, fixed=False))
+      self.__setattr__("d" + str(di), Dec(pretrained_model, fixed=False, gray=args.gray))
     for sei in range(1, args.num_se+1):
       self.__setattr__("se" + str(sei), SE(None, fixed=False))
       
