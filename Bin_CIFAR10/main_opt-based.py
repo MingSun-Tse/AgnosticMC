@@ -163,9 +163,9 @@ if __name__ == "__main__":
   one_hot = OneHotCategorical(torch.Tensor([1./args.num_class] * args.num_class))
   
   # Prepare test code
-  onehot_label = torch.eye(args.num_class)
-  test_codes = torch.randn([args.num_class, args.num_class]) * 5.0 + onehot_label * args.begin
-  test_labels = onehot_label.data.numpy().argmax(axis=1)
+  # onehot_label = torch.eye(args.num_class)
+  # test_codes = torch.randn([args.num_class, args.num_class]) * 5.0 + onehot_label * args.begin
+  # test_labels = onehot_label.data.numpy().argmax(axis=1)
   # np.save(pjoin(rec_img_path, "test_codes.npy"), test_codes.data.cpu().numpy())
   
   # Print setting for later check
@@ -323,6 +323,9 @@ if __name__ == "__main__":
         ae.enc = ae.be
         ae.eval()
         # save some test images
+        onehot_label = torch.eye(args.num_class)
+        test_codes = torch.randn([args.num_class, args.num_class]) * 5.0 + onehot_label * args.begin
+        test_labels = onehot_label.data.numpy().argmax(axis=1)        
         for i in range(len(test_codes)):
           x = test_codes[i].cuda()
           x = x.unsqueeze(0)
@@ -347,9 +350,9 @@ if __name__ == "__main__":
           pred = ae.small_enc(img.cuda()).detach().max(1)[1]
           test_acc += pred.eq(label.view_as(pred)).sum().cpu().data.numpy()
         test_acc /= float(len(data_test))
-        
         format_str = "E{}S{} | =======> Test softloss with real logits: test accuracy on SE: {:.4f}"
         logprint(format_str.format(epoch, step, test_acc))
+        
         torch.save(ae.se1.state_dict(), pjoin(weights_path, "%s_se_E%sS%s_testacc=%.4f.pth" % (TIME_ID, epoch, step, test_acc)))
         torch.save(ae.d1.state_dict(), pjoin(weights_path, "%s_d1_E%sS%s.pth" % (TIME_ID, epoch, step)))
         for di in range(2, args.num_dec+1):
