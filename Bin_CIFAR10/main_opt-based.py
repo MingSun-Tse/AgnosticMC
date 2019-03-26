@@ -83,6 +83,7 @@ parser.add_argument('--classloss_update_interval', type=int, default=1)
 parser.add_argument('--gray', action="store_true")
 parser.add_argument('--use_ave_img', action="store_true")
 parser.add_argument('--acc_thre_reset_dec', type=float, default=0)
+parser.add_argument('--history_acc_weight', type=float, default=0.5)
 args = parser.parse_args()
 
 # Update and check args
@@ -275,7 +276,7 @@ if __name__ == "__main__":
           
           pred = logits1.detach().max(1)[1]; trainacc = pred.eq(label.view_as(pred)).sum().cpu().data.numpy() / float(args.batch_size)
           hardloss_dec.append(hardloss1.data.cpu().numpy()); trainacc_dec.append(trainacc)
-          history_acc[di-1] = (history_acc[di-1] * (total_step-1) + trainacc) / total_step
+          history_acc[di-1] = history_acc[di-1] * args.history_acc_weight + trainacc * (1 - args.history_acc_weight)
           
           advloss = 0
           for sei in range(1, args.num_se+1):
@@ -285,8 +286,11 @@ if __name__ == "__main__":
           
           ## total loss
           loss = softloss1 + hardloss1 + hardloss1_DT + \
-                 advloss
-          if np.random.rand() < 1./args.classloss_update_interval: loss += class_loss # do not let the class loss update too often
+                 advloss + \
+                 tvloss1
+                 
+          if np.random.rand() < 1./args.classloss_update_interval:
+            loss += class_loss # do not let the class loss update too often
 
           dec.zero_grad()
           loss.backward(retain_graph=args.use_ave_img)
@@ -302,7 +306,7 @@ if __name__ == "__main__":
         for di in range(1, args.num_dec+1):
           dec = eval("ae.d" + str(di)); optimizer = optimizer_dec[di-1]; ema = ema_dec[di-1]
           if args.acc_thre_reset_dec and history_acc[di-1] > args.acc_thre_reset_dec: # randomly reset decoder to improve the diversity
-            logprint("E{}S{} | ==> Reset decoder %s, history_acc = %.4f" % (epoch, step, di, history_acc[di-1]))
+            logprint("E{}S{} | ==> Reset decoder {}, history_acc = {:.4f}".format(epoch, step, di, history_acc[di-1]))
             # reset the history_acc
             history_acc[di-1] = 0
             # reset weights
@@ -396,16 +400,17 @@ if __name__ == "__main__":
             format_str5 = " p:" + " {:.4f}" * len(ploss_print)
             format_str6 = " ({:.3f}s/step)"
             format_str = "".join([format_str1, format_str2, format_str3, format_str4, format_str5, format_str6])
-            tmp1 = []; tmp2 = []
+            strvalue2 = []; strvalue3 = []
             for i in range(args.num_dec):
-              tmp1.append(hardloss_dec[i]); tmp1.append(trainacc_dec[i]); tmp1.append(history_acc[i]);
-              tmp2.append(hardloss_se[i]);  tmp2.append(trainacc_se[i])
-            tmp3 = [x.data.cpu().numpy() for x in ploss_print]
-            logprint(format_str.format(epoch, step,
-                *tmp1,
-                *tmp2,
+              strvalue2.append(hardloss_dec[i]); strvalue2.append(trainacc_dec[i]); strvalue2.append(history_acc[i]);
+              strvalue3.append(hardloss_se[i]);  strvalue3.append(trainacc_se[i])
+            strvalue5 = [x.data.cpu().numpy() for x in ploss_print]
+            logprint(format_str.format(
+                epoch, step,
+                *strvalue2,
+                *strvalue3,
                 tvloss1.data.cpu().numpy(), imgnorm1.data.cpu().numpy(),
-                *tmp3,
+                *strvalue5,
                 (time.time()-t1)/args.show_interval))
 
         t1 = time.time()
