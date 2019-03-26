@@ -276,7 +276,7 @@ if __name__ == "__main__":
           
           pred = logits1.detach().max(1)[1]; trainacc = pred.eq(label.view_as(pred)).sum().cpu().data.numpy() / float(args.batch_size)
           hardloss_dec.append(hardloss1.data.cpu().numpy()); trainacc_dec.append(trainacc)
-          history_acc[di-1] = history_acc[di-1] * args.history_acc_weight + trainacc * (1 - args.history_acc_weight)
+          
           
           advloss = 0
           for sei in range(1, args.num_se+1):
@@ -339,6 +339,8 @@ if __name__ == "__main__":
             loss_se += hardloss + hardloss_DT
             pred = logits.detach().max(1)[1]; trainacc = pred.eq(label.view_as(pred)).sum().cpu().data.numpy() / float(args.batch_size)
             hardloss_se.append(hardloss.data.cpu().numpy()); trainacc_se.append(trainacc)
+            if sei == 1:
+              history_acc[di] = history_acc[di] * args.history_acc_weight + trainacc * (1 - args.history_acc_weight)
           loss_se.backward()
           optimizer.step()
           for name, param in se.named_parameters():
@@ -394,16 +396,16 @@ if __name__ == "__main__":
         if args.adv_train:
           if args.adv_train in [3, 4]:
             format_str1 = "E{}S{}"
-            format_str2 = " | dec" + " {:.4f}({:.3f}-{:.3f})" * args.num_dec
-            format_str3 = " | se:" + " {:.4f}({:.3f})" * args.num_dec
+            format_str2 = " | dec" + " {:.4f}({:.3f})" * args.num_dec
+            format_str3 = " | se:" + " {:.4f}({:.3f}-{:.3f})" * args.num_dec
             format_str4 = " | tv: {:.4f} norm: {:.4f}"
             format_str5 = " p:" + " {:.4f}" * len(ploss_print)
             format_str6 = " ({:.3f}s/step)"
             format_str = "".join([format_str1, format_str2, format_str3, format_str4, format_str5, format_str6])
             strvalue2 = []; strvalue3 = []
             for i in range(args.num_dec):
-              strvalue2.append(hardloss_dec[i]); strvalue2.append(trainacc_dec[i]); strvalue2.append(history_acc[i]);
-              strvalue3.append(hardloss_se[i]);  strvalue3.append(trainacc_se[i])
+              strvalue2.append(hardloss_dec[i]); strvalue2.append(trainacc_dec[i])
+              strvalue3.append(hardloss_se[i]);  strvalue3.append(trainacc_se[i]); strvalue3.append(history_acc[i]);
             strvalue5 = [x.data.cpu().numpy() for x in ploss_print]
             logprint(format_str.format(
                 epoch, step,
