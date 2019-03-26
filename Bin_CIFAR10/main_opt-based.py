@@ -12,6 +12,7 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import glob
+import math
 # torch
 import torch
 import torch.nn as nn
@@ -78,8 +79,10 @@ parser.add_argument('--ema_factor', type=float, default=0.9, help="Exponential M
 parser.add_argument('--show_interval', type=int, default=10, help="the interval to print logs")
 parser.add_argument('--save_interval', type=int, default=100, help="the interval to save sample images")
 parser.add_argument('--test_interval', type=int, default=1000, help="the interval to test and save models")
+parser.add_argument('--classloss_update_interval', type=int, default=1)
 parser.add_argument('--gray', action="store_true")
 parser.add_argument('--use_ave_img', action="store_true")
+parser.add_argument('--acc_thre_reset_dec', type=float, default=0)
 args = parser.parse_args()
 
 # Update and check args
@@ -116,6 +119,7 @@ if __name__ == "__main__":
   ae = AE(args).cuda()
   
   # Set up exponential moving average
+  history_acc = []
   if args.adv_train == 4:
     ema_dec = []; ema_se = []
     for di in range(1, args.num_dec+1):
@@ -124,6 +128,7 @@ if __name__ == "__main__":
       for name, param in dec.named_parameters():
         if param.requires_grad:
           ema_dec[-1].register(name, param.data)
+      history_acc.append(0) # to cache history accuracy
     for sei in range(1, args.num_se+1):
       ema_se.append(EMA(args.ema_factor))
       se = eval("ae.se%s" % sei)
@@ -215,9 +220,10 @@ if __name__ == "__main__":
     
     
   # Optimization
-  t1 = time.time()
+  t1 = time.time(); total_step = 0
   for epoch in range(previous_epoch, args.num_epoch):
     for step, (img, label) in enumerate(train_loader):
+      total_step += 1
       ae.train()
       # Generate codes randomly
       if args.use_pseudo_code:
@@ -257,7 +263,7 @@ if __name__ == "__main__":
             
           logprob1 = F.log_softmax(logits1/args.temp, dim=1)
           # logprob2 = F.log_softmax(logits2/args.temp, dim=1)
-          # softloss1 = nn.KLDivLoss()(logprob1, prob_gt.data) * (args.temp*args.temp) * args.lw_soft
+          softloss1 = nn.KLDivLoss()(logprob1, prob_gt.data) * (args.temp*args.temp) * args.lw_soft
           # softloss2 = nn.KLDivLoss()(logprob2, prob_gt.data) * (args.temp*args.temp) * args.lw_soft
           hardloss1 = nn.CrossEntropyLoss()(logits1, label.data) * args.lw_hard
           # hardloss2 = nn.CrossEntropyLoss()(logits2, label.data) * args.lw_hard
@@ -269,6 +275,7 @@ if __name__ == "__main__":
           
           pred = logits1.detach().max(1)[1]; trainacc = pred.eq(label.view_as(pred)).sum().cpu().data.numpy() / float(args.batch_size)
           hardloss_dec.append(hardloss1.data.cpu().numpy()); trainacc_dec.append(trainacc)
+          history_acc[di-1] = (history_acc[di-1] * (total_step-1) + trainacc) / total_step
           
           advloss = 0
           for sei in range(1, args.num_se+1):
@@ -277,8 +284,9 @@ if __name__ == "__main__":
             advloss += args.lw_adv / nn.CrossEntropyLoss()(logits_dse, label.data)
           
           ## total loss
-          loss = class_loss + \
-                  hardloss1 + hardloss1_DT
+          loss = softloss1 + hardloss1 + hardloss1_DT + \
+                 advloss
+          if np.random.rand() < 1./args.classloss_update_interval: loss += class_loss # do not let the class loss update too often
 
           dec.zero_grad()
           loss.backward(retain_graph=args.use_ave_img)
@@ -289,13 +297,30 @@ if __name__ == "__main__":
           logits_ave = ae.be(ave_imgrec)
           hardloss_ave = nn.CrossEntropyLoss()(logits_ave, label.data) * args.lw_hard
           hardloss_ave.backward()
+        
+        # update params
         for di in range(1, args.num_dec+1):
           dec = eval("ae.d" + str(di)); optimizer = optimizer_dec[di-1]; ema = ema_dec[di-1]
-          optimizer.step()
-          for name, param in dec.named_parameters():
-            if param.requires_grad:
-              param.data = ema(name, param.data)
-        
+          if args.acc_thre_reset_dec and history_acc[di-1] > args.acc_thre_reset_dec: # randomly reset decoder to improve the diversity
+            logprint("E{}S{} | ==> Reset decoder %s, history_acc = %.4f" % (epoch, step, di, history_acc[di-1]))
+            # reset the history_acc
+            history_acc[di-1] = 0
+            # reset weights
+            for m in dec.modules():
+              if isinstance(m, nn.Conv2d):
+                n = m.kernel_size[0] * m.kernel_size[1] * m.out_channels
+                m.weight.data.normal_(0, math.sqrt(2. / n))
+                m.bias.data.zero_()              
+            # reset ema, after reseting the weights
+            for name, param in dec.named_parameters():
+              if param.requires_grad:
+                ema.register(name, param.data)
+          else:
+            optimizer.step()
+            for name, param in dec.named_parameters():
+              if param.requires_grad:
+                param.data = ema(name, param.data)
+
         # update SE
         hardloss_se = []; trainacc_se = []
         for sei in range(1, args.num_se+1):
@@ -315,7 +340,8 @@ if __name__ == "__main__":
           for name, param in se.named_parameters():
             if param.requires_grad:
               param.data = ema(name, param.data)
-      
+        
+        
       # Save sample images
       if step % args.save_interval == 0:
         ae.dec = ae.d1
@@ -324,7 +350,7 @@ if __name__ == "__main__":
         ae.eval()
         # save some test images
         onehot_label = torch.eye(args.num_class)
-        test_codes = torch.randn([args.num_class, args.num_class]) * 5.0 + onehot_label * args.begin
+        test_codes = torch.randn([args.num_class, args.num_class]) * (np.random.rand() * 5.0 + 2.0) + onehot_label * np.random.randint(args.end, args.begin)
         test_labels = onehot_label.data.numpy().argmax(axis=1)        
         for i in range(len(test_codes)):
           x = test_codes[i].cuda()
