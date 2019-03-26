@@ -125,48 +125,7 @@ if __name__ == "__main__":
   ae.cuda()
   
   # Set up exponential moving average
-  if args.adv_train == 0:
-    ema = EMA(args.ema_factor)
-    for name, param in ae.named_parameters():
-      if param.requires_grad:
-        ema.register(name, param.data)
-  elif args.adv_train == 1:
-    ema_BD = EMA(args.ema_factor)
-    ema_SE = EMA(args.ema_factor)
-    ema_AdvBE = EMA(args.ema_factor)
-    for name, param in ae.dec.named_parameters():
-      if param.requires_grad:
-        ema_BD.register(name, param.data)
-    for name, param in ae.small_enc.named_parameters():
-      if param.requires_grad:
-        ema_SE.register(name, param.data)
-    for name, param in ae.advbe.named_parameters():
-      if param.requires_grad:
-        ema_AdvBE.register(name, param.data)
-  elif args.adv_train == 2:
-    ema_BD    = EMA(args.ema_factor)
-    ema_SE    = EMA(args.ema_factor)
-    ema_AdvBE = EMA(args.ema_factor); ema_AdvBE2 = EMA(args.ema_factor) 
-    ema_trans = EMA(args.ema_factor); ema_trans2 = EMA(args.ema_factor)
-    for name, param in ae.dec.named_parameters():
-      if param.requires_grad:
-        ema_BD.register(name, param.data)
-    for name, param in ae.small_enc.named_parameters():
-      if param.requires_grad:
-        ema_SE.register(name, param.data)
-    for name, param in ae.advbe.named_parameters():
-      if param.requires_grad:
-        ema_AdvBE.register(name, param.data)
-    for name, param in ae.learned_trans.named_parameters():
-      if param.requires_grad:
-        ema_trans.register(name, param.data)
-    for name, param in ae.advbe2.named_parameters():
-      if param.requires_grad:
-        ema_AdvBE2.register(name, param.data)
-    for name, param in ae.learned_trans2.named_parameters():
-      if param.requires_grad:
-        ema_trans2.register(name, param.data)
-  elif args.adv_train == 3:
+  if args.adv_train == 3:
     ema_dec = []
     for di in range(1, args.num_dec+1):
       ema_dec.append(EMA(args.ema_factor))
@@ -424,7 +383,7 @@ if __name__ == "__main__":
         # logprint("E{}S{} grad x lr:\n{}".format(epoch, step, ave_grad))
       
       # Check decoder: If decoder does not converge, reinitialize it
-      
+      # TODO
       
       # Test and save models
       if step % args.save_interval == 0:
