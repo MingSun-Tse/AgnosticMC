@@ -389,22 +389,21 @@ if __name__ == "__main__":
       if step % args.show_interval == 0:
         if args.adv_train:
           if args.adv_train in [3, 4]:
-            format_str1 = "E{}S{} | dec:"
-            format_str2 = " {:.4f}({:.3f})" * args.num_dec
-            format_str3 = " | se:"
-            format_str4 = " | tv: {:.4f} norm: {:.4f} p:"
-            format_str5 = " {:.4f}" * len(ploss_print)
+            format_str1 = "E{}S{}"
+            format_str2 = " | dec" + " {:.4f}({:.3f}-{:.3f})" * args.num_dec
+            format_str3 = " | se:" + " {:.4f}({:.3f})" * args.num_dec
+            format_str4 = " | tv: {:.4f} norm: {:.4f}"
+            format_str5 = " p:" + " {:.4f}" * len(ploss_print)
             format_str6 = " ({:.3f}s/step)"
-            format_str = "".join([format_str1, format_str2, format_str3, format_str2, format_str4, format_str5, format_str6])
+            format_str = "".join([format_str1, format_str2, format_str3, format_str4, format_str5, format_str6])
             tmp1 = []; tmp2 = []
             for i in range(args.num_dec):
-              tmp1.append(hardloss_dec[i])
-              tmp1.append(trainacc_dec[i])
-              tmp2.append(hardloss_se[i])
-              tmp2.append(trainacc_se[i])
+              tmp1.append(hardloss_dec[i]); tmp1.append(trainacc_dec[i]); tmp1.append(history_acc[i]);
+              tmp2.append(hardloss_se[i]);  tmp2.append(trainacc_se[i])
             tmp3 = [x.data.cpu().numpy() for x in ploss_print]
             logprint(format_str.format(epoch, step,
-                *tmp1, *tmp2,
+                *tmp1,
+                *tmp2,
                 tvloss1.data.cpu().numpy(), imgnorm1.data.cpu().numpy(),
                 *tmp3,
                 (time.time()-t1)/args.show_interval))
