@@ -228,10 +228,10 @@ class Normalize(nn.Module):
     
     
 class DVGG19(nn.Module):
-  def __init__(self, model=None, fixed=None, gray=False):
+  def __init__(self, input_dim, model=None, fixed=None, gray=False):
     super(DVGG19, self).__init__()
     self.classifier = nn.Sequential(
-      nn.Linear(10, 512),
+      nn.Linear(input_dim, 512),
       nn.ReLU(True),
       nn.Linear(512, 512),
       nn.ReLU(True),
@@ -388,7 +388,8 @@ class AutoEncoder_GAN4(nn.Module):
         pretrained_model = [x for x in os.listdir(args.pretrained_dir) if "_d%s_" % di in x and args.pretrained_timeid in x] # the number of pretrained decoder should be like "SERVER218-20190313-1233_d3_E0S0.pth"
         assert(len(pretrained_model) == 1)
         pretrained_model = pretrained_model[0]
-      self.__setattr__("d" + str(di), Dec(pretrained_model, fixed=False, gray=args.gray))
+      input_dim = args.num_z + args.num_class
+      self.__setattr__("d" + str(di), Dec(input_dim, pretrained_model, fixed=False, gray=args.gray))
     for sei in range(1, args.num_se+1):
       self.__setattr__("se" + str(sei), SE(None, fixed=False))
       

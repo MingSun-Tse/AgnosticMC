@@ -62,11 +62,12 @@ parser.add_argument('--lw_norm', type=float, default=1e-4)
 parser.add_argument('--lw_DA',   type=float, default=10)
 parser.add_argument('--lw_adv',  type=float, default=0.5)
 parser.add_argument('--lw_class',  type=float, default=10)
+parser.add_argument('--lw_msgan',  type=float, default=1)
 # ----------------------------------------------------------------
 parser.add_argument('-b', '--batch_size', type=int, default=256)
 parser.add_argument('-p', '--project_name', type=str, default="test")
 parser.add_argument('-r', '--resume', action='store_true')
-parser.add_argument('-m', '--mode', type=str, help='the training mode name.')
+parser.add_argument('-m', '--mode', type=str, default="GAN4", help='the training mode name.')
 parser.add_argument('--num_epoch', type=int, default=96)
 parser.add_argument('--debug', action="store_true")
 parser.add_argument('--num_class', type=int, default=10)
@@ -75,7 +76,7 @@ parser.add_argument('--begin', type=float, default=25)
 parser.add_argument('--end',   type=float, default=20)
 parser.add_argument('--temp',  type=float, default=1, help="the tempature in KD")
 parser.add_argument('--adv_train', type=int, default=0)
-parser.add_argument('--ema_factor', type=float, default=0.9, help="Exponential Moving Average") 
+parser.add_argument('--ema_factor', type=float, default=0.9, help="exponential moving average") 
 parser.add_argument('--show_interval', type=int, default=10, help="the interval to print logs")
 parser.add_argument('--save_interval', type=int, default=100, help="the interval to save sample images")
 parser.add_argument('--test_interval', type=int, default=1000, help="the interval to test and save models")
@@ -84,6 +85,7 @@ parser.add_argument('--gray', action="store_true")
 parser.add_argument('--use_ave_img', action="store_true")
 parser.add_argument('--acc_thre_reset_dec', type=float, default=0)
 parser.add_argument('--history_acc_weight', type=float, default=0.5)
+parser.add_argument('--num_z', type=int, default=100, help="the dimension of hidden z")
 args = parser.parse_args()
 
 # Update and check args
@@ -168,12 +170,6 @@ if __name__ == "__main__":
   # Prepare transform and one hot generator
   one_hot = OneHotCategorical(torch.Tensor([1./args.num_class] * args.num_class))
   
-  # Prepare test code
-  # onehot_label = torch.eye(args.num_class)
-  # test_codes = torch.randn([args.num_class, args.num_class]) * 5.0 + onehot_label * args.begin
-  # test_labels = onehot_label.data.numpy().argmax(axis=1)
-  # np.save(pjoin(rec_img_path, "test_codes.npy"), test_codes.data.cpu().numpy())
-  
   # Print setting for later check
   logprint(args._get_kwargs())
   
@@ -228,26 +224,30 @@ if __name__ == "__main__":
       ae.train()
       # Generate codes randomly
       if args.use_pseudo_code:
-        onehot_label = one_hot.sample_n(args.batch_size)
-        x = torch.randn([args.batch_size, args.num_class]) * (np.random.rand() * 5.0 + 2.0) + onehot_label * np.random.randint(args.end, args.begin) # logits
-        x = x.cuda() / args.temp
-        label = onehot_label.data.numpy().argmax(axis=1)
+        random_z1 = torch.cuda.FloatTensor(args.batch_size, args.num_z); random_z1.copy_(torch.randn(args.batch_size, args.num_z))
+        random_z2 = torch.cuda.FloatTensor(args.batch_size, args.num_z); random_z2.copy_(torch.randn(args.batch_size, args.num_z))
+        z_concat = torch.cat([random_z1, random_z2], dim=0)
+        onehot_label = one_hot.sample_n(args.batch_size).view([args.batch_size, args.num_class]).cuda()
+        label_concat = torch.cat([onehot_label, onehot_label], dim=0)
+        x = torch.cat([z_concat, label_concat], dim=1) # input to the Generator network
+        label = label_concat.data.cpu().numpy().argmax(axis=1)
         label = torch.from_numpy(label).long()
       else:
-        x = ae.be(img.cuda()) / args.temp
-      prob_gt = F.softmax(x, dim=1) # prob, ground truth
+        x = ae.be(img.cuda()) / args.temp # TODO
+      # prob_gt = F.softmax(x, dim=1) # prob, ground truth
       label = label.cuda()
         
       if args.adv_train == 4:
         # update decoder
-        imgrec = []; imgrec_DT = []; hardloss_dec = []; trainacc_dec = []; ave_imgrec = Variable(torch.zeros([args.batch_size, 3, 32, 32], requires_grad=True)).cuda()
+        imgrec = []; imgrec_DT = []; hardloss_dec = []; trainacc_dec = []; ave_imgrec = Variable(torch.zeros([label.size(0), 3, 32, 32], requires_grad=True)).cuda()
         for di in range(1, args.num_dec+1):
           dec = eval("ae.d" + str(di)); optimizer = optimizer_dec[di-1]; ema = ema_dec[di-1]
           imgrec1 = dec(x);       feats1 = ae.be.forward_branch(tensor_normalize(imgrec1)); logits1 = feats1[-1]
-          imgrec2 = dec(logits1); feats2 = ae.be.forward_branch(tensor_normalize(imgrec2)); # logits2 = feats2[-1]
+          # imgrec2 = dec(logits1); feats2 = ae.be.forward_branch(tensor_normalize(imgrec2)); # logits2 = feats2[-1]
           imgrec1_DT = ae.defined_trans(imgrec1); logits1_DT = ae.be(tensor_normalize(imgrec1_DT)) # DT: defined transform
           imgrec.append(imgrec1); imgrec_DT.append(imgrec1_DT) # for SE
-          ave_imgrec += imgrec1 # to get the average img
+          if args.use_ave_img:
+            ave_imgrec += imgrec1
           
           tvloss1 = args.lw_tv * (torch.sum(torch.abs(imgrec1[:, :, :, :-1] - imgrec1[:, :, :, 1:])) + 
                                   torch.sum(torch.abs(imgrec1[:, :, :-1, :] - imgrec1[:, :, 1:, :])))
@@ -259,24 +259,27 @@ if __name__ == "__main__":
           ploss = 0
           ploss_print = []
           for i in range(len(feats1)-1):
-            ploss_print.append(nn.MSELoss()(feats2[i], feats1[i].data) * args.lw_perc)
+            if "feats2" in dir():
+              ploss_print.append(nn.MSELoss()(feats2[i], feats1[i].data) * args.lw_perc)
+            else:
+              ploss_print.append(torch.cuda.FloatTensor(0))
             ploss += ploss_print[-1]
             
-          logprob1 = F.log_softmax(logits1/args.temp, dim=1)
+          # logprob1 = F.log_softmax(logits1/args.temp, dim=1)
           # logprob2 = F.log_softmax(logits2/args.temp, dim=1)
-          softloss1 = nn.KLDivLoss()(logprob1, prob_gt.data) * (args.temp*args.temp) * args.lw_soft
+          # softloss1 = nn.KLDivLoss()(logprob1, prob_gt.data) * (args.temp*args.temp) * args.lw_soft
           # softloss2 = nn.KLDivLoss()(logprob2, prob_gt.data) * (args.temp*args.temp) * args.lw_soft
           hardloss1 = nn.CrossEntropyLoss()(logits1, label.data) * args.lw_hard
           # hardloss2 = nn.CrossEntropyLoss()(logits2, label.data) * args.lw_hard
           hardloss1_DT = nn.CrossEntropyLoss()(logits1_DT, label.data) * args.lw_DA
           
           class_loss = 0
-          for i in range(args.batch_size):
+          for i in range(logits1.size(0)):
             class_loss += -logits1[i, label[i]] * args.lw_class
+          class_loss /= logits1.size(0)
           
-          pred = logits1.detach().max(1)[1]; trainacc = pred.eq(label.view_as(pred)).sum().cpu().data.numpy() / float(args.batch_size)
+          pred = logits1.detach().max(1)[1]; trainacc = pred.eq(label.view_as(pred)).sum().cpu().data.numpy() / label.size(0)
           hardloss_dec.append(hardloss1.data.cpu().numpy()); trainacc_dec.append(trainacc)
-          
           
           advloss = 0
           for sei in range(1, args.num_se+1):
@@ -284,11 +287,19 @@ if __name__ == "__main__":
             logits_dse = se(imgrec1)
             advloss += args.lw_adv / nn.CrossEntropyLoss()(logits_dse, label.data)
           
+          # Diversity encouraging loss
+          # ref: 2019 CVPR Mode Seeking Generative Adversarial Networks for Diverse Image Synthesis
+          imgrec1_1, imgrec1_2 = torch.split(imgrec1, args.batch_size, dim=0)
+          lz = torch.mean(torch.abs(imgrec1_1 - imgrec1_2)) / torch.mean(torch.abs(random_z1 - random_z2))
+          eps = 1e-5
+          loss_diversity = args.lw_msgan / (lz + eps)
+
+          
           ## total loss
-          loss = softloss1 + hardloss1 + hardloss1_DT + \
+          loss = hardloss1 + hardloss1_DT + \
                  advloss + \
-                 tvloss1
-                 
+                 tvloss1 + imgnorm1 + \
+                 loss_diversity
           if np.random.rand() < 1./args.classloss_update_interval:
             loss += class_loss # do not let the class loss update too often
 
@@ -337,7 +348,7 @@ if __name__ == "__main__":
             hardloss = nn.CrossEntropyLoss()(logits, label.data) * args.lw_hard
             hardloss_DT = nn.CrossEntropyLoss()(logits_DT, label.data) * args.lw_DA
             loss_se += hardloss + hardloss_DT
-            pred = logits.detach().max(1)[1]; trainacc = pred.eq(label.view_as(pred)).sum().cpu().data.numpy() / float(args.batch_size)
+            pred = logits.detach().max(1)[1]; trainacc = pred.eq(label.view_as(pred)).sum().cpu().data.numpy() / label.size(0)
             hardloss_se.append(hardloss.data.cpu().numpy()); trainacc_se.append(trainacc)
             if sei == 1:
               history_acc[di] = history_acc[di] * args.history_acc_weight + trainacc * (1 - args.history_acc_weight)
@@ -355,8 +366,9 @@ if __name__ == "__main__":
         ae.enc = ae.be
         ae.eval()
         # save some test images
+        logprint("E{}S{} | Saving image samples".format(epoch, step))
         onehot_label = torch.eye(args.num_class)
-        test_codes = torch.randn([args.num_class, args.num_class]) * (np.random.rand() * 5.0 + 2.0) + onehot_label * np.random.randint(args.end, args.begin)
+        test_codes = torch.cat([torch.randn([args.num_class, args.num_z]), onehot_label], dim=1)
         test_labels = onehot_label.data.numpy().argmax(axis=1)        
         for i in range(len(test_codes)):
           x = test_codes[i].cuda()
@@ -366,6 +378,7 @@ if __name__ == "__main__":
             img1 = dec(x)
             out_img1_path = pjoin(rec_img_path, "%s_E%sS%s_imgrec%s_label=%s_d%s.jpg" % (TIME_ID, epoch, step, i, test_labels[i], di))
             vutils.save_image(img1.data.cpu().float(), out_img1_path)
+          
       
       # Test and save models
       if step % args.test_interval == 0:
@@ -396,23 +409,22 @@ if __name__ == "__main__":
         if args.adv_train:
           if args.adv_train in [3, 4]:
             format_str1 = "E{}S{}"
-            format_str2 = " | dec" + " {:.4f}({:.3f})" * args.num_dec
-            format_str3 = " | se:" + " {:.4f}({:.3f}-{:.3f})" * args.num_dec
-            format_str4 = " | tv: {:.4f} norm: {:.4f}"
-            format_str5 = " p:" + " {:.4f}" * len(ploss_print)
+            format_str2 = " | dec:" + " {:.3f}({:.3f})" * args.num_dec
+            format_str3 = " | se:" + " {:.3f}({:.3f}-{:.3f})" * args.num_dec
+            format_str4 = " | tv: {:.3f} norm: {:.3f} diversity: {:.3f}"
+            format_str5 = "" # " p:" + " {:.4f}" * len(ploss_print)
             format_str6 = " ({:.3f}s/step)"
             format_str = "".join([format_str1, format_str2, format_str3, format_str4, format_str5, format_str6])
             strvalue2 = []; strvalue3 = []
             for i in range(args.num_dec):
               strvalue2.append(hardloss_dec[i]); strvalue2.append(trainacc_dec[i])
               strvalue3.append(hardloss_se[i]);  strvalue3.append(trainacc_se[i]); strvalue3.append(history_acc[i]);
-            strvalue5 = [x.data.cpu().numpy() for x in ploss_print]
+            # strvalue5 = [x.data.cpu().numpy() for x in ploss_print]
             logprint(format_str.format(
                 epoch, step,
                 *strvalue2,
                 *strvalue3,
-                tvloss1.data.cpu().numpy(), imgnorm1.data.cpu().numpy(),
-                *strvalue5,
+                tvloss1.data.cpu().numpy(), imgnorm1.data.cpu().numpy(), loss_diversity.data.cpu().numpy(),
                 (time.time()-t1)/args.show_interval))
 
         t1 = time.time()
