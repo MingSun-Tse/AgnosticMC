@@ -260,7 +260,7 @@ class DVGG19(nn.Module):
     return x
     
 class DVGG19_deconv(nn.Module):
-  def __init__(self, input_dim, model=None, fixed=None, gray=False, d=32):
+  def __init__(self, input_dim, model=None, fixed=None, gray=False, d=128):
     super(DVGG19_deconv, self).__init__()
     self.deconv1 = nn.ConvTranspose2d(input_dim, d*4, 4, 1, 0)
     self.deconv1_bn = nn.BatchNorm2d(d*4)
