@@ -61,7 +61,7 @@ parser.add_argument('--lw_tv',   type=float, default=1e-6)
 parser.add_argument('--lw_norm', type=float, default=1e-4)
 parser.add_argument('--lw_DA',   type=float, default=10)
 parser.add_argument('--lw_adv',  type=float, default=0.5)
-parser.add_argument('--lw_class',  type=float, default=10)
+parser.add_argument('--lw_actimax',  type=float, default=10)
 parser.add_argument('--lw_msgan',  type=float, default=1)
 # ----------------------------------------------------------------
 parser.add_argument('-b', '--batch_size', type=int, default=256)
@@ -205,9 +205,9 @@ if __name__ == "__main__":
       # processed_image = preprocess_image(created_image, False) # normalize
       # optimizer_preimage = torch.optim.SGD([processed_image], lr=6)
       # logits = ae.be(processed_image)
-      # class_loss = -logits[0, cls]
+      # activmax_loss = -logits[0, cls]
       # ae.be.zero_grad()
-      # class_loss.backward()
+      # activmax_loss.backward()
       # optimizer_preimage.step() # optimize the image
       # created_image = recreate_image(processed_image) # 0-1 image to 0-255 image
       # if i == num_step-1:
@@ -243,7 +243,6 @@ if __name__ == "__main__":
         for di in range(1, args.num_dec+1):
           dec = eval("ae.d" + str(di)); optimizer = optimizer_dec[di-1]; ema = ema_dec[di-1]
           imgrec1 = dec(x);       feats1 = ae.be.forward_branch(tensor_normalize(imgrec1)); logits1 = feats1[-1]
-          # imgrec2 = dec(logits1); feats2 = ae.be.forward_branch(tensor_normalize(imgrec2)); # logits2 = feats2[-1]
           imgrec1_DT = ae.defined_trans(imgrec1); logits1_DT = ae.be(tensor_normalize(imgrec1_DT)) # DT: defined transform
           imgrec.append(imgrec1); imgrec_DT.append(imgrec1_DT) # for SE
           if args.use_ave_img:
@@ -251,10 +250,7 @@ if __name__ == "__main__":
           
           tvloss1 = args.lw_tv * (torch.sum(torch.abs(imgrec1[:, :, :, :-1] - imgrec1[:, :, :, 1:])) + 
                                   torch.sum(torch.abs(imgrec1[:, :, :-1, :] - imgrec1[:, :, 1:, :])))
-          # tvloss2 = args.lw_tv * (torch.sum(torch.abs(imgrec2[:, :, :, :-1] - imgrec2[:, :, :, 1:])) + 
-                                  # torch.sum(torch.abs(imgrec2[:, :, :-1, :] - imgrec2[:, :, 1:, :])))
           imgnorm1 = torch.pow(torch.norm(imgrec1, p=6), 6) * args.lw_norm
-          # imgnorm2 = torch.pow(torch.norm(imgrec2, p=6), 6) * args.lw_norm
           
           ploss = 0
           ploss_print = []
@@ -270,13 +266,12 @@ if __name__ == "__main__":
           # softloss1 = nn.KLDivLoss()(logprob1, prob_gt.data) * (args.temp*args.temp) * args.lw_soft
           # softloss2 = nn.KLDivLoss()(logprob2, prob_gt.data) * (args.temp*args.temp) * args.lw_soft
           hardloss1 = nn.CrossEntropyLoss()(logits1, label.data) * args.lw_hard
-          # hardloss2 = nn.CrossEntropyLoss()(logits2, label.data) * args.lw_hard
           hardloss1_DT = nn.CrossEntropyLoss()(logits1_DT, label.data) * args.lw_DA
           
-          class_loss = 0
+          activmax_loss = 0
           for i in range(logits1.size(0)):
-            class_loss += -logits1[i, label[i]] * args.lw_class
-          class_loss /= logits1.size(0)
+            activmax_loss += -logits1[i, label[i]] * args.lw_actimax
+          activmax_loss /= logits1.size(0)
           
           pred = logits1.detach().max(1)[1]; trainacc = pred.eq(label.view_as(pred)).sum().cpu().data.numpy() / label.size(0)
           hardloss_dec.append(hardloss1.data.cpu().numpy()); trainacc_dec.append(trainacc)
@@ -301,7 +296,7 @@ if __name__ == "__main__":
                  tvloss1 + imgnorm1 + \
                  loss_diversity
           if np.random.rand() < 1./args.classloss_update_interval:
-            loss += class_loss # do not let the class loss update too often
+            loss += activmax_loss # do not let the class loss update too often
 
           dec.zero_grad()
           loss.backward(retain_graph=args.use_ave_img)

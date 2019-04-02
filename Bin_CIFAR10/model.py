@@ -112,7 +112,7 @@ def make_layers_dec(cfg, batch_norm=False):
   for v in cfg:
     if v == 'Up':
       layers += [nn.UpsamplingNearest2d(scale_factor=2)]
-    else:
+    else: # conv layer
       conv2d = nn.Conv2d(in_channels, v, kernel_size=3, padding=1)
       if batch_norm:
         layers += [conv2d, nn.BatchNorm2d(v), nn.ReLU(inplace=True)]
@@ -178,7 +178,6 @@ class VGG19(nn.Module):
     y.append(x)
     return y
     
-    
 class SmallVGG19(nn.Module):
   def __init__(self, model=None, fixed=None):
     super(SmallVGG19, self).__init__()
@@ -211,7 +210,6 @@ class SmallVGG19(nn.Module):
     x = self.classifier(x)
     return x
 
-
 class Normalize(nn.Module):
   def __init__(self):
     super(Normalize, self).__init__()
@@ -225,7 +223,6 @@ class Normalize(nn.Module):
     self.normalize.requires_grad = False
   def forward(self, x):
     return self.normalize(x)
-    
     
 class DVGG19(nn.Module):
   def __init__(self, input_dim, model=None, fixed=None, gray=False):
@@ -260,6 +257,48 @@ class DVGG19(nn.Module):
     x = x.view(x.size(0), 512, 1, 1)
     x = self.features(x)
     x = torch.stack([x]*3, dim=1).squeeze(2) if self.gray else x
+    return x
+    
+class DVGG19_deconv(nn.Module):
+  def __init__(self, input_dim, model=None, fixed=None, gray=False, d=32):
+    super(DVGG19_deconv, self).__init__()
+    self.deconv1 = nn.ConvTranspose2d(input_dim, d*4, 4, 1, 0)
+    self.deconv1_bn = nn.BatchNorm2d(d*4)
+    self.relu1 = nn.ReLU(True)
+    self.deconv2 = nn.ConvTranspose2d(d*4, d*2, 4, 2, 1)
+    self.deconv2_bn = nn.BatchNorm2d(d*2)
+    self.relu2 = nn.ReLU(True)
+    self.deconv3 = nn.ConvTranspose2d(d*2, d, 4, 2, 1)
+    self.deconv3_bn =nn.BatchNorm2d(d)
+    self.relu3 = nn.ReLU(True)
+    self.deconv4 = nn.ConvTranspose2d(d, 3, 4, 2, 1)
+    self.tanh = nn.Tanh()
+    self.sigm = nn.Sigmoid()
+    
+    # use upsampling for the last conv layer
+    self.upscale = nn.UpsamplingNearest2d(scale_factor=2)
+    self.conv4 = nn.Conv2d(d, 3, 3, 1, 1)
+    
+    if model:
+     checkpoint = torch.load(model)
+     self.load_state_dict(checkpoint)
+    else:
+      for m in self.modules():
+        if isinstance(m, nn.Conv2d):
+          n = m.kernel_size[0] * m.kernel_size[1] * m.out_channels
+          m.weight.data.normal_(0, math.sqrt(2. / n))
+          m.bias.data.zero_()
+
+    if fixed:
+      for param in self.parameters():
+          param.requires_grad = False
+          
+  def forward(self, x):
+    x = x.view(x.size(0), x.size(1), 1, 1)           # batch x num_z+num_class x 1 x 1
+    x = self.relu1(self.deconv1_bn(self.deconv1(x))) # batch x 512 x 4 x 4
+    x = self.relu2(self.deconv2_bn(self.deconv2(x))) # batch x 256 x 8 x 8
+    x = self.relu3(self.deconv3_bn(self.deconv3(x))) # batch x 128 x 16 x 16
+    x = self.sigm(self.deconv4(x))                   # batch x 3 x 32 x 32
     return x
     
 # ---------------------------------------------------
@@ -373,7 +412,7 @@ class Transform8(nn.Module): # random transform combination
 # ---------------------------------------------------
 # AutoEncoder part
 BE  = VGG19 # Big Encoder
-Dec = DVGG19 # Decoder
+Dec = DVGG19_deconv # Decoder
 SE  = SmallVGG19 # Small Encoder
 
 class AutoEncoder_GAN4(nn.Module):
