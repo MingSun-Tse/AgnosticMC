@@ -284,8 +284,13 @@ if __name__ == "__main__":
           
           # Diversity encouraging loss
           # ref: 2019 CVPR Mode Seeking Generative Adversarial Networks for Diverse Image Synthesis
-          imgrec1_1, imgrec1_2 = torch.split(imgrec1, args.batch_size, dim=0)
-          lz = torch.mean(torch.abs(imgrec1_1 - imgrec1_2)) / torch.mean(torch.abs(random_z1 - random_z2))
+          msgan_option = "feature"
+          if msgan_option == "pixel":
+            imgrec1_1, imgrec1_2 = torch.split(imgrec1, args.batch_size, dim=0)
+            lz = torch.mean(torch.abs(imgrec1_1 - imgrec1_2)) / torch.mean(torch.abs(random_z1 - random_z2))
+          elif msgan_option == "feature":
+            feats1_1, feats1_2 = torch.split(feats1[2], args.batch_size, dim=0)
+            lz = torch.mean(torch.abs(feats1_1 - feats1_2)) / torch.mean(torch.abs(random_z1 - random_z2))
           eps = 1e-5
           loss_diversity = args.lw_msgan / (lz + eps)
 
