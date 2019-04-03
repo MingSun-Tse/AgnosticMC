@@ -61,6 +61,7 @@ parser.add_argument('--normloss_weight', type=float, default=1e-4)
 parser.add_argument('--daloss_weight',   type=float, default=10)
 parser.add_argument('--advloss_weight',  type=float, default=20)
 parser.add_argument('--lw_adv',  type=float, default=0.5)
+parser.add_argument('--lw_class',  type=float, default=10)
 parser.add_argument('--floss_lw', type=str, default="1-1-1-1-1-1-1")
 parser.add_argument('--ploss_lw', type=str, default="1-1-1-1-1-1-1")
 # ----------------------------------------------------------------
@@ -337,11 +338,16 @@ if __name__ == "__main__":
             logits_dse = se(imgrec1)
             advloss += args.lw_adv / nn.CrossEntropyLoss()(logits_dse, label.data) * args.hardloss_weight
           
+          class_loss = 0
+          for i in range(args.batch_size):
+            class_loss += -logits1[i, label[i]] * args.lw_class
+          
           ## total loss
           loss = tvloss1 + imgnorm1 + tvloss2 + imgnorm2 + \
                   ploss1 + ploss2 + ploss3 + ploss4 + \
-                  softloss1 + softloss2 + hardloss1 + hardloss1_DT + hardloss2 \
-                  + advloss
+                  softloss1 + softloss2 + hardloss1 + hardloss1_DT + hardloss2 + \
+                  advloss + \
+                  class_loss
           loss.backward()
           optimizer.step()
           for name, param in dec.named_parameters():
@@ -446,8 +452,8 @@ if __name__ == "__main__":
         test_acc /= float(len(data_test))
         test_acc_advbe /= float(len(data_test))
         
-        format_str = "E{}S{} | =======> Test softloss with real logits: BE: {:.5f}({:.3f}) SE: {:.5f}({:.3f}) | test accuracy on SE: {:.4f} | test accuracy on AdvBE: {:.4f}"
-        logprint(format_str.format(epoch, step, softloss1_test, test_acc1, Ssoftloss1_test, Stest_acc, test_acc, test_acc_advbe))
+        format_str = "E{}S{} | =======> Test softloss with real logits: test accuracy on SE: {:.4f}"
+        logprint(format_str.format(epoch, step, test_acc))
         if args.adv_train in [3, 4]:
           ae.se = ae.se if args.adv_train == 3 else ae.se1
           torch.save(ae.se.state_dict(), pjoin(weights_path, "%s_se_E%sS%s_testacc=%.4f.pth" % (TIME_ID, epoch, step, test_acc)))
@@ -458,41 +464,22 @@ if __name__ == "__main__":
             
       # Print training loss
       if step % args.show_interval == 0:
-        if args.adv_train:
-          if args.adv_train in [3, 4]:
-            format_str1 = "E{}S{} | dec:"
-            format_str2 = " {:.4f}({:.3f})" * args.num_dec
-            format_str3 = " | se:"
-            format_str4 = " | soft: {:.4f} tv: {:.4f} norm: {:.4f} p: {:.4f} {:.4f} {:.4f} {:.4f} ({:.3f}s/step)"
-            format_str = "".join([format_str1, format_str2, format_str3, format_str2, format_str4])
-            tmp1 = []; tmp2 = []
-            for i in range(args.num_dec):
-              tmp1.append(hardloss_dec[i])
-              tmp1.append(trainacc_dec[i])
-              tmp2.append(hardloss_se[i])
-              tmp2.append(trainacc_se[i])
-            logprint(format_str.format(epoch, step,
-                *tmp1, *tmp2,
-                softloss1.cpu().item(), tvloss1.data.cpu().numpy(), imgnorm1.data.cpu().numpy(), ploss1.data.cpu().numpy(), ploss2.data.cpu().numpy(), ploss3.data.cpu().numpy(), ploss4.data.cpu().numpy(),
-                (time.time()-t1)/args.show_interval))
-        else:
-          if args.mode in ["BD", "BDSE"]:
-            format_str = "E{}S{} loss: {:.3f} | soft: {:.5f} {:.5f} | tv: {:.5f} {:.5f} | norm: {:.5f} {:.5f} | hard: {:.5f}({:.4f}) {:.5f}({:.4f}) {:.5f} | p: {:.5f} {:.5f} {:.5f} {:.5f} ({:.3f}s/step)"
-            logprint(format_str.format(epoch, step, loss.data.cpu().numpy(), softloss1.data.cpu().numpy(), softloss2.data.cpu().numpy(),
-                tvloss1.data.cpu().numpy(), tvloss2.data.cpu().numpy(),
-                img_norm1.data.cpu().numpy(), img_norm2.data.cpu().numpy(),
-                hardloss1.data.cpu().numpy(), trainacc1, hardloss1_DA.data.cpu().numpy(), trainacc2, Shardloss1_DA.data.cpu().numpy(),
-                ploss1.data.cpu().numpy(), ploss2.data.cpu().numpy(), ploss3.data.cpu().numpy(), ploss4.data.cpu().numpy(),
-                (time.time()-t1)/args.show_interval))
-          
-          elif args.mode == "SE":
-            format_str = "E{}S{} loss: {:.3f} | soft: {:.5f} {:.5f} | tv: {:.5f} {:.5f} | hard: {:.5f}({:.4f}) {:.5f}({:.4f}) | f: {:.5f} {:.5f} | p: {:.5f} {:.5f} {:.5f} {:.5f} ({:.3f}s/step)"
-            logprint(format_str.format(epoch, step, loss.data.cpu().numpy(), softloss1.data.cpu().numpy(), softloss2.data.cpu().numpy(),
-                tvloss1.data.cpu().numpy(), tvloss2.data.cpu().numpy(),
-                hardloss1.data.cpu().numpy(), trainacc1, hardloss2.data.cpu().numpy(), trainacc2,
-                floss3.data.cpu().numpy(), floss4.data.cpu().numpy(), 
-                ploss1.data.cpu().numpy(), ploss2.data.cpu().numpy(), ploss3.data.cpu().numpy(), ploss4.data.cpu().numpy(), 
-                (time.time()-t1)/args.show_interval))
+        if args.adv_train in [3, 4]:
+          format_str1 = "E{}S{} | dec:"
+          format_str2 = " {:.4f}({:.3f})" * args.num_dec
+          format_str3 = " | se:"
+          format_str4 = " | tv: {:.4f} norm: {:.4f} p: {:.4f} {:.4f} {:.4f} {:.4f} ({:.3f}s/step)"
+          format_str = "".join([format_str1, format_str2, format_str3, format_str2, format_str4])
+          tmp1 = []; tmp2 = []
+          for i in range(args.num_dec):
+            tmp1.append(hardloss_dec[i])
+            tmp1.append(trainacc_dec[i])
+            tmp2.append(hardloss_se[i])
+            tmp2.append(trainacc_se[i])
+          logprint(format_str.format(epoch, step,
+              *tmp1, *tmp2,
+              tvloss1.data.cpu().numpy(), imgnorm1.data.cpu().numpy(), ploss1.data.cpu().numpy(), ploss2.data.cpu().numpy(), ploss3.data.cpu().numpy(), ploss4.data.cpu().numpy(),
+              (time.time()-t1)/args.show_interval))
         t1 = time.time()
       
       

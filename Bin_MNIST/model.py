@@ -104,6 +104,7 @@ class DLeNet5(nn.Module):
     self.conv1 = nn.Conv2d( 6, 1, kernel_size=(5, 5), stride=(1, 1), padding=(2, 2))
     
     self.relu = nn.ReLU(inplace=True)
+    self.sigm = nn.Sigmoid()
     self.unpool = nn.UpsamplingNearest2d(scale_factor=2)
     self.pad = nn.ReflectionPad2d((2,2,2,2))
     
