@@ -286,6 +286,11 @@ if __name__ == "__main__":
           if args.msgan_option == "pixel":
             imgrec1_1, imgrec1_2 = torch.split(imgrec1, args.batch_size, dim=0)
             lz = torch.mean(torch.abs(imgrec1_1 - imgrec1_2)) / torch.mean(torch.abs(random_z1 - random_z2))
+          elif args.msgan_option == "pixelgray":
+            imgrec1_1, imgrec1_2 = torch.split(imgrec1, args.batch_size, dim=0)
+            imgrec1_1 = imgrec1_1[:,0,:,:] * 0.299 + imgrec1_1[:,1,:,:] * 0.587 + imgrec1_1[:,2,:,:] * 0.114
+            imgrec1_2 = imgrec1_2[:,0,:,:] * 0.299 + imgrec1_2[:,1,:,:] * 0.587 + imgrec1_2[:,2,:,:] * 0.114
+            lz = torch.mean(torch.abs(imgrec1_1 - imgrec1_2)) / torch.mean(torch.abs(random_z1 - random_z2))
           elif args.msgan_option == "feature":
             feats1_1, feats1_2 = torch.split(feats1[2], args.batch_size, dim=0)
             lz = torch.mean(torch.abs(feats1_1 - feats1_2)) / torch.mean(torch.abs(random_z1 - random_z2))
@@ -434,4 +439,3 @@ if __name__ == "__main__":
                 (time.time()-t1)/args.show_interval))
 
         t1 = time.time()
-  log.close()
