@@ -84,7 +84,7 @@ parser.add_argument('--classloss_update_interval', type=int, default=1)
 parser.add_argument('--gray', action="store_true")
 parser.add_argument('--use_ave_img', action="store_true")
 parser.add_argument('--acc_thre_reset_dec', type=float, default=0)
-parser.add_argument('--history_acc_weight', type=float, default=0.5)
+parser.add_argument('--history_acc_weight', type=float, default=0.25)
 parser.add_argument('--num_z', type=int, default=100, help="the dimension of hidden z")
 args = parser.parse_args()
 
@@ -122,7 +122,8 @@ if __name__ == "__main__":
   ae = AE(args).cuda()
   
   # Set up exponential moving average
-  history_acc = []
+  history_acc_se = []
+  history_acc_dec = []
   if args.adv_train == 4:
     ema_dec = []; ema_se = []
     for di in range(1, args.num_dec+1):
@@ -131,7 +132,8 @@ if __name__ == "__main__":
       for name, param in dec.named_parameters():
         if param.requires_grad:
           ema_dec[-1].register(name, param.data)
-      history_acc.append(0) # to cache history accuracy
+      history_acc_se.append(0) # to cache history accuracy
+      history_acc_dec.append(0)
     for sei in range(1, args.num_se+1):
       ema_se.append(EMA(args.ema_factor))
       se = eval("ae.se%s" % sei)
@@ -229,9 +231,9 @@ if __name__ == "__main__":
         z_concat = torch.cat([random_z1, random_z2], dim=0)
         onehot_label = one_hot.sample_n(args.batch_size).view([args.batch_size, args.num_class]).cuda()
         label_concat = torch.cat([onehot_label, onehot_label], dim=0)
-        x = torch.cat([z_concat, label_concat], dim=1) # input to the Generator network
+        x = torch.cat([z_concat, label_concat], dim=1).detach() # input to the Generator network
         label = label_concat.data.cpu().numpy().argmax(axis=1)
-        label = torch.from_numpy(label).long()
+        label = torch.from_numpy(label).long().detach()
       else:
         x = ae.be(img.cuda()) / args.temp # TODO
       # prob_gt = F.softmax(x, dim=1) # prob, ground truth
@@ -265,22 +267,18 @@ if __name__ == "__main__":
           # logprob2 = F.log_softmax(logits2/args.temp, dim=1)
           # softloss1 = nn.KLDivLoss()(logprob1, prob_gt.data) * (args.temp*args.temp) * args.lw_soft
           # softloss2 = nn.KLDivLoss()(logprob2, prob_gt.data) * (args.temp*args.temp) * args.lw_soft
-          hardloss1 = nn.CrossEntropyLoss()(logits1, label.data) * args.lw_hard
-          hardloss1_DT = nn.CrossEntropyLoss()(logits1_DT, label.data) * args.lw_DA
-          
-          activmax_loss = 0
-          for i in range(logits1.size(0)):
-            activmax_loss += -logits1[i, label[i]] * args.lw_actimax
-          activmax_loss /= logits1.size(0)
+          hardloss1 = nn.CrossEntropyLoss()(logits1, label) * args.lw_hard
+          hardloss1_DT = nn.CrossEntropyLoss()(logits1_DT, label) * args.lw_DA
           
           pred = logits1.detach().max(1)[1]; trainacc = pred.eq(label.view_as(pred)).sum().cpu().data.numpy() / label.size(0)
           hardloss_dec.append(hardloss1.data.cpu().numpy()); trainacc_dec.append(trainacc)
+          history_acc_dec[di-1] = history_acc_dec[di-1] * args.history_acc_weight + trainacc * (1 - args.history_acc_weight)
           
           advloss = 0
           for sei in range(1, args.num_se+1):
             se = eval("ae.se" + str(sei))
             logits_dse = se(imgrec1)
-            advloss += args.lw_adv / nn.CrossEntropyLoss()(logits_dse, label.data)
+            advloss += args.lw_adv / nn.CrossEntropyLoss()(logits_dse, label)
           
           # Diversity encouraging loss
           # ref: 2019 CVPR Mode Seeking Generative Adversarial Networks for Diverse Image Synthesis
@@ -294,6 +292,11 @@ if __name__ == "__main__":
           eps = 1e-5
           loss_diversity = args.lw_msgan / (lz + eps)
 
+          # activation maximization loss
+          activmax_loss = 0
+          for i in range(logits1.size(0)):
+            activmax_loss += -logits1[i, label[i]] * args.lw_actimax * 20 / loss_diversity.detach()
+          activmax_loss /= logits1.size(0)
           
           ## total loss
           loss = hardloss1 + hardloss1_DT + \
@@ -310,16 +313,19 @@ if __name__ == "__main__":
         if args.use_ave_img:
           ave_imgrec /= args.num_dec
           logits_ave = ae.be(ave_imgrec)
-          hardloss_ave = nn.CrossEntropyLoss()(logits_ave, label.data) * args.lw_hard
+          hardloss_ave = nn.CrossEntropyLoss()(logits_ave, label) * args.lw_hard
           hardloss_ave.backward()
         
         # update params
         for di in range(1, args.num_dec+1):
           dec = eval("ae.d" + str(di)); optimizer = optimizer_dec[di-1]; ema = ema_dec[di-1]
-          if args.acc_thre_reset_dec and history_acc[di-1] > args.acc_thre_reset_dec: # randomly reset decoder to improve the diversity
-            logprint("E{}S{} | ==> Reset decoder {}, history_acc = {:.4f}".format(epoch, step, di, history_acc[di-1]))
+          if args.acc_thre_reset_dec and history_acc_se[di-1] > args.acc_thre_reset_dec \
+            and history_acc_dec[di-1] > args.acc_thre_reset_dec:
+            logprint("E{}S{} | ==> Reset decoder {}, history_acc_se = {:.4f}, history_acc_dec = {:.4f}".format(epoch, step, di, 
+                history_acc_se[di-1], history_acc_dec[di-1]))
             # reset the history_acc
-            history_acc[di-1] = 0
+            history_acc_dec[di-1] = 0
+            history_acc_se[di-1] = 0
             # reset weights
             for m in dec.modules():
               if isinstance(m, nn.Conv2d):
@@ -342,16 +348,16 @@ if __name__ == "__main__":
           se = eval("ae.se" + str(sei)); optimizer = optimizer_se[sei-1]; ema = ema_se[sei-1]
           se.zero_grad()
           loss_se = 0
-          for di in range(args.num_dec):
-            logits = se(tensor_normalize(imgrec[di].detach()))
-            logits_DT = se(tensor_normalize(imgrec_DT[di].detach()))
-            hardloss = nn.CrossEntropyLoss()(logits, label.data) * args.lw_hard
-            hardloss_DT = nn.CrossEntropyLoss()(logits_DT, label.data) * args.lw_DA
+          for di in range(1, args.num_dec+1):
+            logits = se(tensor_normalize(imgrec[di-1].detach()))
+            logits_DT = se(tensor_normalize(imgrec_DT[di-1].detach()))
+            hardloss = nn.CrossEntropyLoss()(logits, label) * args.lw_hard
+            hardloss_DT = nn.CrossEntropyLoss()(logits_DT, label) * args.lw_DA
             loss_se += hardloss + hardloss_DT
             pred = logits.detach().max(1)[1]; trainacc = pred.eq(label.view_as(pred)).sum().cpu().data.numpy() / label.size(0)
             hardloss_se.append(hardloss.data.cpu().numpy()); trainacc_se.append(trainacc)
             if sei == 1:
-              history_acc[di] = history_acc[di] * args.history_acc_weight + trainacc * (1 - args.history_acc_weight)
+              history_acc_se[di-1] = history_acc_se[di-1] * args.history_acc_weight + trainacc * (1 - args.history_acc_weight)
           loss_se.backward()
           optimizer.step()
           for name, param in se.named_parameters():
@@ -369,7 +375,7 @@ if __name__ == "__main__":
         logprint("E{}S{} | Saving image samples".format(epoch, step))
         onehot_label = torch.eye(args.num_class)
         test_codes = torch.cat([torch.randn([args.num_class, args.num_z]), onehot_label], dim=1)
-        test_labels = onehot_label.data.numpy().argmax(axis=1)        
+        test_labels = onehot_label.numpy().argmax(axis=1)        
         for i in range(len(test_codes)):
           x = test_codes[i].cuda()
           x = x.unsqueeze(0)
@@ -409,7 +415,7 @@ if __name__ == "__main__":
         if args.adv_train:
           if args.adv_train in [3, 4]:
             format_str1 = "E{}S{}"
-            format_str2 = " | dec:" + " {:.3f}({:.3f})" * args.num_dec
+            format_str2 = " | dec:" + " {:.3f}({:.3f}-{:.3f})" * args.num_dec
             format_str3 = " | se:" + " {:.3f}({:.3f}-{:.3f})" * args.num_dec
             format_str4 = " | tv: {:.3f} norm: {:.3f} diversity: {:.3f}"
             format_str5 = "" # " p:" + " {:.4f}" * len(ploss_print)
@@ -417,8 +423,8 @@ if __name__ == "__main__":
             format_str = "".join([format_str1, format_str2, format_str3, format_str4, format_str5, format_str6])
             strvalue2 = []; strvalue3 = []
             for i in range(args.num_dec):
-              strvalue2.append(hardloss_dec[i]); strvalue2.append(trainacc_dec[i])
-              strvalue3.append(hardloss_se[i]);  strvalue3.append(trainacc_se[i]); strvalue3.append(history_acc[i]);
+              strvalue2.append(hardloss_dec[i]); strvalue2.append(trainacc_dec[i]); strvalue2.append(history_acc_dec[i])
+              strvalue3.append(hardloss_se[i]);  strvalue3.append(trainacc_se[i]); strvalue3.append(history_acc_se[i])
             # strvalue5 = [x.data.cpu().numpy() for x in ploss_print]
             logprint(format_str.format(
                 epoch, step,

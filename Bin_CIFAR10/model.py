@@ -88,8 +88,10 @@ cfg = {
     'E': [64, 64, 'M', 128, 128, 'M', 256, 256, 256, 256, 'M', 512, 512, 512, 512, 'M', 512, 512, 512, 512, 'M'],
     'SE': [32, 32, 'M', 64, 64, 'M', 128, 128, 128, 128, 'M', 256, 256, 256, 256, 'M', 256, 256, 256, 256, 'M'],
     'Dec': ["Up", 512, 512, "Up", 512, 512, "Up", 256, 256, "Up", 128, 128, "Up", 64, 3],
+    'Dec_s': ["Up", 128, 128, "Up", 128, 128, "Up", 64, 64, "Up", 32, 32, "Up", 16, 3],
+    'Dec_s2': ["Up", 256, "Up", 256, "Up", 128, "Up", 64, "Up", 32, 3],
     'Dec_gray': ["Up", 512, 512, "Up", 512, 512, "Up", 256, 256, "Up", 128, 128, "Up", 64, 1],
-} # "M": maxpooling
+}
 
 def make_layers(cfg, batch_norm=False):
   layers = []
@@ -115,7 +117,10 @@ def make_layers_dec(cfg, batch_norm=False):
     else: # conv layer
       conv2d = nn.Conv2d(in_channels, v, kernel_size=3, padding=1)
       if batch_norm:
-        layers += [conv2d, nn.BatchNorm2d(v), nn.ReLU(inplace=True)]
+        if v == cfg[-1]:
+          layers += [conv2d, nn.BatchNorm2d(v), nn.Sigmoid()] # normalize output image to [0, 1]
+        else: 
+          layers += [conv2d, nn.BatchNorm2d(v), nn.ReLU(inplace=True)]
       else:
         if v == cfg[-1]:
           layers += [conv2d, nn.Sigmoid()] # normalize output image to [0, 1]
@@ -236,7 +241,7 @@ class DVGG19(nn.Module):
       nn.ReLU(True),
     )
     self.gray = gray
-    self.features = make_layers_dec(cfg["Dec_gray"]) if gray else make_layers_dec(cfg["Dec"])
+    self.features = make_layers_dec(cfg["Dec_gray"]) if gray else make_layers_dec(cfg["Dec_s"], batch_norm=True)
 
     if model:
      checkpoint = torch.load(model)
@@ -411,8 +416,8 @@ class Transform8(nn.Module): # random transform combination
 
 # ---------------------------------------------------
 # AutoEncoder part
-BE  = VGG19 # Big Encoder
-Dec = DVGG19_deconv # Decoder
+BE  = VGG19      # Big Encoder
+Dec = DVGG19     # Decoder
 SE  = SmallVGG19 # Small Encoder
 
 class AutoEncoder_GAN4(nn.Module):
