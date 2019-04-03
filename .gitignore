@@ -1,3 +1,6 @@
 /Experiments
 *.pth
-
+*.jpg
+*.png
+*.bmp
+*.pyc
