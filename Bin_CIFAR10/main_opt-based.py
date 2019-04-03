@@ -264,6 +264,7 @@ if __name__ == "__main__":
               ploss_print.append(torch.cuda.FloatTensor(0))
             ploss += ploss_print[-1]
             
+          ## Classification loss, the bottomline loss
           # logprob1 = F.log_softmax(logits1/args.temp, dim=1)
           # logprob2 = F.log_softmax(logits2/args.temp, dim=1)
           # softloss1 = nn.KLDivLoss()(logprob1, prob_gt.data) * (args.temp*args.temp) * args.lw_soft
@@ -275,13 +276,14 @@ if __name__ == "__main__":
           hardloss_dec.append(hardloss1.data.cpu().numpy()); trainacc_dec.append(trainacc)
           history_acc_dec[di-1] = history_acc_dec[di-1] * args.history_acc_weight + trainacc * (1 - args.history_acc_weight)
           
+          ## Adversarial loss
           advloss = 0
           for sei in range(1, args.num_se+1):
             se = eval("ae.se" + str(sei))
             logits_dse = se(imgrec1)
             advloss += args.lw_adv / nn.CrossEntropyLoss()(logits_dse, label)
           
-          # Diversity encouraging loss
+          ## Diversity encouraging loss 1: MSGAN
           # ref: 2019 CVPR Mode Seeking Generative Adversarial Networks for Diverse Image Synthesis
           if args.msgan_option == "pixel":
             imgrec1_1, imgrec1_2 = torch.split(imgrec1, args.batch_size, dim=0)
@@ -296,11 +298,15 @@ if __name__ == "__main__":
             lz = torch.mean(torch.abs(feats1_1 - feats1_2)) / torch.mean(torch.abs(random_z1 - random_z2))
           eps = 1e-5
           loss_diversity = args.lw_msgan / (lz + eps)
-
-          # activation maximization loss
+          
+          ## Diversity encouraging loss 2
+          # ref: 2017 CVPR Diversified Texture Synthesis with Feed-forward Networks
+          
+          
+          ## Activation maximization loss
           activmax_loss = 0
           for i in range(logits1.size(0)):
-            activmax_loss += -logits1[i, label[i]] * args.lw_actimax * 20 / loss_diversity.detach()
+            activmax_loss += -logits1[i, label[i]] * args.lw_actimax
           activmax_loss /= logits1.size(0)
           
           ## total loss
