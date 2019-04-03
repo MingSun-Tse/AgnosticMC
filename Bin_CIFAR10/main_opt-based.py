@@ -86,6 +86,7 @@ parser.add_argument('--use_ave_img', action="store_true")
 parser.add_argument('--acc_thre_reset_dec', type=float, default=0)
 parser.add_argument('--history_acc_weight', type=float, default=0.25)
 parser.add_argument('--num_z', type=int, default=100, help="the dimension of hidden z")
+parser.add_argument('--msgan_option', type=str, default="pixel")
 args = parser.parse_args()
 
 # Update and check args
@@ -282,11 +283,10 @@ if __name__ == "__main__":
           
           # Diversity encouraging loss
           # ref: 2019 CVPR Mode Seeking Generative Adversarial Networks for Diverse Image Synthesis
-          msgan_option = "feature"
-          if msgan_option == "pixel":
+          if args.msgan_option == "pixel":
             imgrec1_1, imgrec1_2 = torch.split(imgrec1, args.batch_size, dim=0)
             lz = torch.mean(torch.abs(imgrec1_1 - imgrec1_2)) / torch.mean(torch.abs(random_z1 - random_z2))
-          elif msgan_option == "feature":
+          elif args.msgan_option == "feature":
             feats1_1, feats1_2 = torch.split(feats1[2], args.batch_size, dim=0)
             lz = torch.mean(torch.abs(feats1_1 - feats1_2)) / torch.mean(torch.abs(random_z1 - random_z2))
           eps = 1e-5
