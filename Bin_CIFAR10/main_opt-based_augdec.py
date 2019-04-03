@@ -26,7 +26,7 @@ from torch.distributions.one_hot_categorical import OneHotCategorical
 import torchvision.datasets as datasets
 from torch.autograd import Variable
 # my libs
-from model import AutoEncoders, EMA, Normalize, preprocess_image, recreate_image
+from model_augdec import AutoEncoders, EMA, Normalize, preprocess_image, recreate_image
 
 
 def logprint(some_str):
@@ -245,81 +245,85 @@ if __name__ == "__main__":
         imgrec = []; imgrec_DT = []; hardloss_dec = []; trainacc_dec = []; ave_imgrec = Variable(torch.zeros([label.size(0), 3, 32, 32], requires_grad=True)).cuda()
         for di in range(1, args.num_dec+1):
           dec = eval("ae.d" + str(di)); optimizer = optimizer_dec[di-1]; ema = ema_dec[di-1]
-          imgrec1 = dec(x);       feats1 = ae.be.forward_branch(tensor_normalize(imgrec1)); logits1 = feats1[-1]
-          imgrec1_DT = ae.defined_trans(imgrec1); logits1_DT = ae.be(tensor_normalize(imgrec1_DT)) # DT: defined transform
-          imgrec.append(imgrec1); imgrec_DT.append(imgrec1_DT) # for SE
-          if args.use_ave_img:
-            ave_imgrec += imgrec1
-          
-          tvloss1 = args.lw_tv * (torch.sum(torch.abs(imgrec1[:, :, :, :-1] - imgrec1[:, :, :, 1:])) + 
-                                  torch.sum(torch.abs(imgrec1[:, :, :-1, :] - imgrec1[:, :, 1:, :])))
-          imgnorm1 = torch.pow(torch.norm(imgrec1, p=6), 6) * args.lw_norm
-          
-          ploss = 0
-          ploss_print = []
-          for i in range(len(feats1)-1):
-            if "feats2" in dir():
-              ploss_print.append(nn.MSELoss()(feats2[i], feats1[i].data) * args.lw_perc)
-            else:
-              ploss_print.append(torch.cuda.FloatTensor(0))
-            ploss += ploss_print[-1]
+          imgdecs = torch.split(dec(x), 3, dim=1) # 3 channels
+          total_loss = 0
+          for imgrec1 in imgdecs:
+            feats1 = ae.be.forward_branch(tensor_normalize(imgrec1)); logits1 = feats1[-1]
+            imgrec1_DT = ae.defined_trans(imgrec1); logits1_DT = ae.be(tensor_normalize(imgrec1_DT)) # DT: defined transform
+            imgrec.append(imgrec1); imgrec_DT.append(imgrec1_DT) # for SE
+            if args.use_ave_img:
+              ave_imgrec += imgrec1
             
-          ## Classification loss, the bottomline loss
-          # logprob1 = F.log_softmax(logits1/args.temp, dim=1)
-          # logprob2 = F.log_softmax(logits2/args.temp, dim=1)
-          # softloss1 = nn.KLDivLoss()(logprob1, prob_gt.data) * (args.temp*args.temp) * args.lw_soft
-          # softloss2 = nn.KLDivLoss()(logprob2, prob_gt.data) * (args.temp*args.temp) * args.lw_soft
-          hardloss1 = nn.CrossEntropyLoss()(logits1, label) * args.lw_hard
-          hardloss1_DT = nn.CrossEntropyLoss()(logits1_DT, label) * args.lw_DA
+            tvloss1 = args.lw_tv * (torch.sum(torch.abs(imgrec1[:, :, :, :-1] - imgrec1[:, :, :, 1:])) + 
+                                    torch.sum(torch.abs(imgrec1[:, :, :-1, :] - imgrec1[:, :, 1:, :])))
+            imgnorm1 = torch.pow(torch.norm(imgrec1, p=6), 6) * args.lw_norm
+            
+            ploss = 0
+            ploss_print = []
+            for i in range(len(feats1)-1):
+              if "feats2" in dir():
+                ploss_print.append(nn.MSELoss()(feats2[i], feats1[i].data) * args.lw_perc)
+              else:
+                ploss_print.append(torch.cuda.FloatTensor(0))
+              ploss += ploss_print[-1]
+              
+            ## Classification loss, the bottomline loss
+            # logprob1 = F.log_softmax(logits1/args.temp, dim=1)
+            # logprob2 = F.log_softmax(logits2/args.temp, dim=1)
+            # softloss1 = nn.KLDivLoss()(logprob1, prob_gt.data) * (args.temp*args.temp) * args.lw_soft
+            # softloss2 = nn.KLDivLoss()(logprob2, prob_gt.data) * (args.temp*args.temp) * args.lw_soft
+            hardloss1 = nn.CrossEntropyLoss()(logits1, label) * args.lw_hard
+            hardloss1_DT = nn.CrossEntropyLoss()(logits1_DT, label) * args.lw_DA
+            
+            pred = logits1.detach().max(1)[1]; trainacc = pred.eq(label.view_as(pred)).sum().cpu().data.numpy() / label.size(0)
+            hardloss_dec.append(hardloss1.data.cpu().numpy()); trainacc_dec.append(trainacc)
+            history_acc_dec[di-1] = history_acc_dec[di-1] * args.history_acc_weight + trainacc * (1 - args.history_acc_weight)
+            
+            ## Adversarial loss
+            advloss = 0
+            for sei in range(1, args.num_se+1):
+              se = eval("ae.se" + str(sei))
+              logits_dse = se(imgrec1)
+              advloss += args.lw_adv / nn.CrossEntropyLoss()(logits_dse, label)
+            
+            ## Diversity encouraging loss 1: MSGAN
+            # ref: 2019 CVPR Mode Seeking Generative Adversarial Networks for Diverse Image Synthesis
+            if args.msgan_option == "pixel":
+              imgrec1_1, imgrec1_2 = torch.split(imgrec1, args.batch_size, dim=0)
+              lz = torch.mean(torch.abs(imgrec1_1 - imgrec1_2)) / torch.mean(torch.abs(random_z1 - random_z2))
+            elif args.msgan_option == "pixelgray":
+              imgrec1_1, imgrec1_2 = torch.split(imgrec1, args.batch_size, dim=0)
+              imgrec1_1 = imgrec1_1[:,0,:,:] * 0.299 + imgrec1_1[:,1,:,:] * 0.587 + imgrec1_1[:,2,:,:] * 0.114
+              imgrec1_2 = imgrec1_2[:,0,:,:] * 0.299 + imgrec1_2[:,1,:,:] * 0.587 + imgrec1_2[:,2,:,:] * 0.114
+              lz = torch.mean(torch.abs(imgrec1_1 - imgrec1_2)) / torch.mean(torch.abs(random_z1 - random_z2))
+            elif args.msgan_option == "feature":
+              feats1_1, feats1_2 = torch.split(feats1[2], args.batch_size, dim=0)
+              lz = torch.mean(torch.abs(feats1_1 - feats1_2)) / torch.mean(torch.abs(random_z1 - random_z2))
+            eps = 1e-5
+            loss_diversity = args.lw_msgan / (lz + eps)
+            
+            ## Diversity encouraging loss 2
+            # ref: 2017 CVPR Diversified Texture Synthesis with Feed-forward Networks
+            
+            
+            ## Activation maximization loss
+            activmax_loss = 0
+            for i in range(logits1.size(0)):
+              activmax_loss += -logits1[i, label[i]] * args.lw_actimax
+            activmax_loss /= logits1.size(0)
+            
+            
+            ## total loss
+            loss = hardloss1 + hardloss1_DT + \
+                   advloss + \
+                   tvloss1 + imgnorm1 + \
+                   loss_diversity
+            if np.random.rand() < 1./args.classloss_update_interval:
+              loss += activmax_loss # do not let the class loss update too often
+            total_loss += loss
           
-          pred = logits1.detach().max(1)[1]; trainacc = pred.eq(label.view_as(pred)).sum().cpu().data.numpy() / label.size(0)
-          hardloss_dec.append(hardloss1.data.cpu().numpy()); trainacc_dec.append(trainacc)
-          history_acc_dec[di-1] = history_acc_dec[di-1] * args.history_acc_weight + trainacc * (1 - args.history_acc_weight)
-          
-          ## Adversarial loss
-          advloss = 0
-          for sei in range(1, args.num_se+1):
-            se = eval("ae.se" + str(sei))
-            logits_dse = se(imgrec1)
-            advloss += args.lw_adv / nn.CrossEntropyLoss()(logits_dse, label)
-          
-          ## Diversity encouraging loss 1: MSGAN
-          # ref: 2019 CVPR Mode Seeking Generative Adversarial Networks for Diverse Image Synthesis
-          if args.msgan_option == "pixel":
-            imgrec1_1, imgrec1_2 = torch.split(imgrec1, args.batch_size, dim=0)
-            lz = torch.mean(torch.abs(imgrec1_1 - imgrec1_2)) / torch.mean(torch.abs(random_z1 - random_z2))
-          elif args.msgan_option == "pixelgray":
-            imgrec1_1, imgrec1_2 = torch.split(imgrec1, args.batch_size, dim=0)
-            imgrec1_1 = imgrec1_1[:,0,:,:] * 0.299 + imgrec1_1[:,1,:,:] * 0.587 + imgrec1_1[:,2,:,:] * 0.114
-            imgrec1_2 = imgrec1_2[:,0,:,:] * 0.299 + imgrec1_2[:,1,:,:] * 0.587 + imgrec1_2[:,2,:,:] * 0.114
-            lz = torch.mean(torch.abs(imgrec1_1 - imgrec1_2)) / torch.mean(torch.abs(random_z1 - random_z2))
-          elif args.msgan_option == "feature":
-            feats1_1, feats1_2 = torch.split(feats1[2], args.batch_size, dim=0)
-            lz = torch.mean(torch.abs(feats1_1 - feats1_2)) / torch.mean(torch.abs(random_z1 - random_z2))
-          eps = 1e-5
-          loss_diversity = args.lw_msgan / (lz + eps)
-          
-          ## Diversity encouraging loss 2
-          # ref: 2017 CVPR Diversified Texture Synthesis with Feed-forward Networks
-          
-          
-          ## Activation maximization loss
-          activmax_loss = 0
-          for i in range(logits1.size(0)):
-            activmax_loss += -logits1[i, label[i]] * args.lw_actimax
-          activmax_loss /= logits1.size(0)
-          
-          
-          ## total loss
-          loss = hardloss1 + hardloss1_DT + \
-                 advloss + \
-                 tvloss1 + imgnorm1 + \
-                 loss_diversity
-          if np.random.rand() < 1./args.classloss_update_interval:
-            loss += activmax_loss # do not let the class loss update too often
-
           dec.zero_grad()
-          loss.backward(retain_graph=args.use_ave_img)
+          total_loss.backward(retain_graph=args.use_ave_img)
         
         # average image loss
         if args.use_ave_img:
@@ -393,10 +397,12 @@ if __name__ == "__main__":
           x = x.unsqueeze(0)
           for di in range(1, args.num_dec+1):
             dec = eval("ae.d%s" % di)
-            img1 = dec(x)
-            out_img1_path = pjoin(rec_img_path, "%s_E%sS%s_imgrec%s_label=%s_d%s.jpg" % (TIME_ID, epoch, step, i, test_labels[i], di))
-            vutils.save_image(img1.data.cpu().float(), out_img1_path)
-          
+            imgs = torch.split(dec(x), 3, dim=1)
+            for j in range(len(imgs)):
+              img1 = imgs[j]
+              out_img1_path = pjoin(rec_img_path, "%s_E%sS%s_imgrec%s_label=%s_d%s_%s.jpg" % (TIME_ID, epoch, step, i, test_labels[i], di, j))
+              vutils.save_image(img1.data.cpu().float(), out_img1_path)
+            
       
       # Test and save models
       if step % args.test_interval == 0:
@@ -446,3 +452,5 @@ if __name__ == "__main__":
                 (time.time()-t1)/args.show_interval))
 
         t1 = time.time()
+        
+        

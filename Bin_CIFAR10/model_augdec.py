@@ -453,7 +453,7 @@ class Transform8(nn.Module): # random transform combination
 # ---------------------------------------------------
 # AutoEncoder part
 BE  = VGG19      # Big Encoder
-Dec = DVGG19     # Decoder
+Dec = DVGG19_aug # Decoder
 SE  = SmallVGG19 # Small Encoder
 
 class AutoEncoder_GAN4(nn.Module):
