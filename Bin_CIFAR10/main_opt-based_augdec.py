@@ -422,11 +422,11 @@ if __name__ == "__main__":
         format_str = "E{}S{} | =======> Test softloss with real logits: test accuracy on SE: {:.4f}"
         logprint(format_str.format(epoch, step, test_acc))
         
-        torch.save(ae.se1.state_dict(), pjoin(weights_path, "%s_se_E%sS%s_testacc=%.4f.pth" % (TIME_ID, epoch, step, test_acc)))
-        torch.save(ae.d1.state_dict(), pjoin(weights_path, "%s_d1_E%sS%s.pth" % (TIME_ID, epoch, step)))
-        for di in range(2, args.num_dec+1):
-          dec = eval("ae.d" + str(di))
-          torch.save(dec.state_dict(), pjoin(weights_path, "%s_d%s_E%sS%s.pth" % (TIME_ID, di, epoch, step)))
+        # torch.save(ae.se1.state_dict(), pjoin(weights_path, "%s_se_E%sS%s_testacc=%.4f.pth" % (TIME_ID, epoch, step, test_acc)))
+        # torch.save(ae.d1.state_dict(), pjoin(weights_path, "%s_d1_E%sS%s.pth" % (TIME_ID, epoch, step)))
+        # for di in range(2, args.num_dec+1):
+          # dec = eval("ae.d" + str(di))
+          # torch.save(dec.state_dict(), pjoin(weights_path, "%s_d%s_E%sS%s.pth" % (TIME_ID, di, epoch, step)))
 
       # Print training loss
       if step % args.show_interval == 0:

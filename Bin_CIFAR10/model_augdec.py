@@ -89,7 +89,7 @@ cfg = {
     'SE': [32, 32, 'M', 64, 64, 'M', 128, 128, 128, 128, 'M', 256, 256, 256, 256, 'M', 256, 256, 256, 256, 'M'],
     'Dec': ["Up", 512, 512, "Up", 512, 512, "Up", 256, 256, "Up", 128, 128, "Up", 64, 3],
     'Dec_s': ["Up", 128, 128, "Up", 128, 128, "Up", 64, 64, "Up", 32, 32, "Up", 16, 3],
-    'Dec_s_aug': ["Up", 128, 128, "Up", 128, 128, "Up", 64, 64, "Up", 32, 32, "Up", 16, 15],
+    'Dec_s_aug': ["Up", 128, 128, "Up", 128, 128, "Up", 64, 64, "Up", "64-g2", "160-g4", "Up", "80-g5", "15-g5"],
     'Dec_s2': ["Up", 256, "Up", 256, "Up", 128, "Up", 64, "Up", 32, 3],
     'Dec_gray': ["Up", 512, 512, "Up", 512, 512, "Up", 256, 256, "Up", 128, 128, "Up", 64, 1],
 }
@@ -116,7 +116,13 @@ def make_layers_dec(cfg, batch_norm=False):
     if v == 'Up':
       layers += [nn.UpsamplingNearest2d(scale_factor=2)]
     else: # conv layer
-      conv2d = nn.Conv2d(in_channels, v, kernel_size=3, padding=1)
+      if str(v).isdigit():
+        v = v
+        g = 1
+      else:
+        g = int(v.split("g")[1])
+        v = int(v.split("-")[0])
+      conv2d = nn.Conv2d(in_channels, v, kernel_size=3, padding=1, groups=g)
       if batch_norm:
         if v == cfg[-1]:
           layers += [conv2d, nn.BatchNorm2d(v), nn.Sigmoid()] # normalize output image to [0, 1]
