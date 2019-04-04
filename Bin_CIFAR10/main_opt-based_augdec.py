@@ -82,7 +82,6 @@ parser.add_argument('--save_interval', type=int, default=100, help="the interval
 parser.add_argument('--test_interval', type=int, default=1000, help="the interval to test and save models")
 parser.add_argument('--classloss_update_interval', type=int, default=1)
 parser.add_argument('--gray', action="store_true")
-parser.add_argument('--use_ave_img', action="store_true")
 parser.add_argument('--acc_thre_reset_dec', type=float, default=0)
 parser.add_argument('--history_acc_weight', type=float, default=0.25)
 parser.add_argument('--num_z', type=int, default=100, help="the dimension of hidden z")
@@ -242,7 +241,7 @@ if __name__ == "__main__":
         
       if args.adv_train == 4:
         # update decoder
-        imgrec = []; imgrec_DT = []; hardloss_dec = []; trainacc_dec = []; ave_imgrec = Variable(torch.zeros([label.size(0), 3, 32, 32], requires_grad=True)).cuda()
+        imgrec = []; imgrec_DT = []; hardloss_dec = []; trainacc_dec = []
         for di in range(1, args.num_dec+1):
           dec = eval("ae.d" + str(di)); optimizer = optimizer_dec[di-1]; ema = ema_dec[di-1]
           imgdecs = torch.split(dec(x), 3, dim=1) # 3 channels
@@ -251,8 +250,6 @@ if __name__ == "__main__":
             feats1 = ae.be.forward_branch(tensor_normalize(imgrec1)); logits1 = feats1[-1]
             imgrec1_DT = ae.defined_trans(imgrec1); logits1_DT = ae.be(tensor_normalize(imgrec1_DT)) # DT: defined transform
             imgrec.append(imgrec1); imgrec_DT.append(imgrec1_DT) # for SE
-            if args.use_ave_img:
-              ave_imgrec += imgrec1
             
             tvloss1 = args.lw_tv * (torch.sum(torch.abs(imgrec1[:, :, :, :-1] - imgrec1[:, :, :, 1:])) + 
                                     torch.sum(torch.abs(imgrec1[:, :, :-1, :] - imgrec1[:, :, 1:, :])))
@@ -323,15 +320,8 @@ if __name__ == "__main__":
             total_loss += loss
           
           dec.zero_grad()
-          total_loss.backward(retain_graph=args.use_ave_img)
-        
-        # average image loss
-        if args.use_ave_img:
-          ave_imgrec /= args.num_dec
-          logits_ave = ae.be(ave_imgrec)
-          hardloss_ave = nn.CrossEntropyLoss()(logits_ave, label) * args.lw_hard
-          hardloss_ave.backward()
-        
+          total_loss.backward()
+                
         # update params
         for di in range(1, args.num_dec+1):
           dec = eval("ae.d" + str(di)); optimizer = optimizer_dec[di-1]; ema = ema_dec[di-1]
