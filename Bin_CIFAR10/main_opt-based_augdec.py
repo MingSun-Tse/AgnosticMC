@@ -134,8 +134,9 @@ if __name__ == "__main__":
       for name, param in dec.named_parameters():
         if param.requires_grad:
           ema_dec[-1].register(name, param.data)
-      history_acc_se.append(0) # to cache history accuracy
-      history_acc_dec.append(0)
+      for _ in range(args.num_divbranch):
+        history_acc_se.append(0)
+        history_acc_dec.append(0)
     for sei in range(1, args.num_se+1):
       ema_se.append(EMA(args.ema_factor))
       se = eval("ae.se%s" % sei)
@@ -344,7 +345,7 @@ if __name__ == "__main__":
           se = eval("ae.se" + str(sei)); optimizer = optimizer_se[sei-1]; ema = ema_se[sei-1]
           se.zero_grad()
           loss_se = 0
-          for di in range(1, args.num_dec+1):
+          for di in range(1, args.num_divbranch+1):
             logits = se(tensor_normalize(imgrec[di-1].detach()))
             logits_DT = se(tensor_normalize(imgrec_DT[di-1].detach()))
             hardloss = nn.CrossEntropyLoss()(logits, label) * args.lw_hard
@@ -413,14 +414,14 @@ if __name__ == "__main__":
         if args.adv_train:
           if args.adv_train in [3, 4]:
             format_str1 = "E{}S{}"
-            format_str2 = " | dec:" + " {:.3f}({:.3f}-{:.3f})" * args.num_dec
-            format_str3 = " | se:" + " {:.3f}({:.3f}-{:.3f})" * args.num_dec
+            format_str2 = " | dec:" + " {:.3f}({:.3f}-{:.3f})" * args.num_divbranch
+            format_str3 = " | se:" + " {:.3f}({:.3f}-{:.3f})" * args.num_divbranch
             format_str4 = " | tv: {:.3f} norm: {:.3f} diversity: {:.3f}"
             format_str5 = "" # " p:" + " {:.4f}" * len(ploss_print)
             format_str6 = " ({:.3f}s/step)"
             format_str = "".join([format_str1, format_str2, format_str3, format_str4, format_str5, format_str6])
             strvalue2 = []; strvalue3 = []
-            for i in range(args.num_dec):
+            for i in range(args.num_divbranch):
               strvalue2.append(hardloss_dec[i]); strvalue2.append(trainacc_dec[i]); strvalue2.append(history_acc_dec[i])
               strvalue3.append(hardloss_se[i]);  strvalue3.append(trainacc_se[i]); strvalue3.append(history_acc_se[i])
             # strvalue5 = [x.data.cpu().numpy() for x in ploss_print]
