@@ -45,7 +45,7 @@ parser.add_argument('--e1',  type=str,   default="models/model_best.pth.tar")
 parser.add_argument('--e2',  type=str,   default=None)
 parser.add_argument('--pretrained_dir',   type=str, default=None, help="the directory of pretrained decoder models")
 parser.add_argument('--pretrained_timeid',type=str, default=None, help="the timeid of the pretrained models.")
-parser.add_argument('--num_dec', type=int, default=9)
+parser.add_argument('--num_dec', type=int, default=1)
 parser.add_argument('--num_se', type=int, default=1)
 parser.add_argument('--t',   type=str,   default=None)
 parser.add_argument('--gpu', type=int,   default=0)
@@ -63,6 +63,7 @@ parser.add_argument('--lw_DA',   type=float, default=10)
 parser.add_argument('--lw_adv',  type=float, default=0.5)
 parser.add_argument('--lw_actimax',  type=float, default=10)
 parser.add_argument('--lw_msgan',  type=float, default=1)
+parser.add_argument('--lw_innerdiv',  type=float, default=1)
 # ----------------------------------------------------------------
 parser.add_argument('-b', '--batch_size', type=int, default=256)
 parser.add_argument('-p', '--project_name', type=str, default="test")
@@ -86,6 +87,7 @@ parser.add_argument('--acc_thre_reset_dec', type=float, default=0)
 parser.add_argument('--history_acc_weight', type=float, default=0.25)
 parser.add_argument('--num_z', type=int, default=100, help="the dimension of hidden z")
 parser.add_argument('--msgan_option', type=str, default="pixel")
+parser.add_argument('--num_divbranch', type=int, default=5)
 args = parser.parse_args()
 
 # Update and check args
@@ -225,24 +227,18 @@ if __name__ == "__main__":
           dec = eval("ae.d" + str(di)); optimizer = optimizer_dec[di-1]; ema = ema_dec[di-1]
           imgdecs = torch.split(dec(x), 3, dim=1) # 3 channels
           total_loss = 0
+          imgtmp = []
           for imgrec1 in imgdecs:
-            feats1 = ae.be.forward_branch(tensor_normalize(imgrec1)); logits1 = feats1[-1]
+            # feats1 = ae.be.forward_branch(tensor_normalize(imgrec1)); logits1 = feats1[-1]
+            logits1 = ae.be(tensor_normalize(imgrec1))
             imgrec1_DT = ae.defined_trans(imgrec1); logits1_DT = ae.be(tensor_normalize(imgrec1_DT)) # DT: defined transform
             imgrec.append(imgrec1); imgrec_DT.append(imgrec1_DT) # for SE
+            imgtmp.append(imgrec1)
             
             tvloss1 = args.lw_tv * (torch.sum(torch.abs(imgrec1[:, :, :, :-1] - imgrec1[:, :, :, 1:])) + 
                                     torch.sum(torch.abs(imgrec1[:, :, :-1, :] - imgrec1[:, :, 1:, :])))
             imgnorm1 = torch.pow(torch.norm(imgrec1, p=6), 6) * args.lw_norm
             
-            ploss = 0
-            ploss_print = []
-            for i in range(len(feats1)-1):
-              if "feats2" in dir():
-                ploss_print.append(nn.MSELoss()(feats2[i], feats1[i].data) * args.lw_perc)
-              else:
-                ploss_print.append(torch.cuda.FloatTensor(0))
-              ploss += ploss_print[-1]
-              
             ## Classification loss, the bottomline loss
             # logprob1 = F.log_softmax(logits1/args.temp, dim=1)
             # logprob2 = F.log_softmax(logits2/args.temp, dim=1)
@@ -281,23 +277,38 @@ if __name__ == "__main__":
             ## Diversity encouraging loss 2
             # ref: 2017 CVPR Diversified Texture Synthesis with Feed-forward Networks
             
-            
             ## Activation maximization loss
             activmax_loss = 0
             for i in range(logits1.size(0)):
               activmax_loss += -logits1[i, label[i]] * args.lw_actimax
             activmax_loss /= logits1.size(0)
             
-            
             ## total loss
             loss = hardloss1 + hardloss1_DT + \
                    advloss + \
                    tvloss1 + imgnorm1 + \
-                   loss_diversity
+                   loss_diversity \
+            
             if np.random.rand() < 1./args.classloss_update_interval:
               loss += activmax_loss # do not let the class loss update too often
             total_loss += loss
           
+          ## Encourage inner diversity
+          # the diversity loss ref: 2017 CVPR Diversified Texture Synthesis with Feed-forward Networks
+          imgtmp = np.array(imgtmp)
+          order = np.arange(len(imgtmp))
+          order2 = np.arange(len(imgtmp))
+          while 1:
+            np.random.shuffle(order)
+            if not any(order == order2):
+              break
+          imgtmp_reordered = imgtmp[order] # re-ordering
+          loss_innerdivsity = 0
+          for i in range(len(imgtmp)):
+            loss_innerdivsity += torch.mean(torch.abs(imgtmp[i] - imgtmp_reordered[i]))
+          loss_innerdivsity /= len(imgtmp)
+
+          total_loss += args.lw_innerdiv / loss_innerdivsity
           dec.zero_grad()
           total_loss.backward()
                 
@@ -421,5 +432,3 @@ if __name__ == "__main__":
                 (time.time()-t1)/args.show_interval))
 
         t1 = time.time()
-        
-        

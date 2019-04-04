@@ -89,7 +89,7 @@ cfg = {
     'SE': [32, 32, 'M', 64, 64, 'M', 128, 128, 128, 128, 'M', 256, 256, 256, 256, 'M', 256, 256, 256, 256, 'M'],
     'Dec': ["Up", 512, 512, "Up", 512, 512, "Up", 256, 256, "Up", 128, 128, "Up", 64, 3],
     'Dec_s': ["Up", 128, 128, "Up", 128, 128, "Up", 64, 64, "Up", 32, 32, "Up", 16, 3],
-    'Dec_s_aug': ["Up", 128, 128, "Up", 128, 128, "Up", 64, 64, "Up", "64-g2", "160-g4", "Up", "80-g5", "15-g5"],
+    'Dec_s_aug': ["Up", 128, 128, "Up", 128, 128, "Up", 64, 64, "Up", "64-2", "8x-4", "Up", "16x-x", "3x-x"],
     'Dec_s2': ["Up", 256, "Up", 256, "Up", 128, "Up", 64, "Up", 32, 3],
     'Dec_gray': ["Up", 512, 512, "Up", 512, 512, "Up", 256, 256, "Up", 128, 128, "Up", 64, 1],
 }
@@ -123,6 +123,33 @@ def make_layers_dec(cfg, batch_norm=False):
         g = int(v.split("g")[1])
         v = int(v.split("-")[0])
       conv2d = nn.Conv2d(in_channels, v, kernel_size=3, padding=1, groups=g)
+      if batch_norm:
+        if v == cfg[-1]:
+          layers += [conv2d, nn.BatchNorm2d(v), nn.Sigmoid()] # normalize output image to [0, 1]
+        else: 
+          layers += [conv2d, nn.BatchNorm2d(v), nn.ReLU(inplace=True)]
+      else:
+        if v == cfg[-1]:
+          layers += [conv2d, nn.Sigmoid()] # normalize output image to [0, 1]
+        else: 
+          layers += [conv2d, nn.ReLU(inplace=True)]
+      in_channels = v
+  return nn.Sequential(*layers)
+  
+def make_layers_augdec(cfg, batch_norm=False, num_divbranch=1):
+  layers = []
+  in_channels = 512
+  for v in cfg:
+    if v == 'Up':
+      layers += [nn.UpsamplingNearest2d(scale_factor=2)]
+    else: # conv layer
+      if str(v).isdigit():
+        group = 1
+      else:
+        num_filter, group = v.split("-")
+        v = int(num_filter) if num_filter.isdigit() else int(num_filter.split("x")[0]) * num_divbranch
+        group = int(group) if group.isdigit() else num_divbranch
+      conv2d = nn.Conv2d(in_channels, v, kernel_size=3, padding=1, groups=group)
       if batch_norm:
         if v == cfg[-1]:
           layers += [conv2d, nn.BatchNorm2d(v), nn.Sigmoid()] # normalize output image to [0, 1]
@@ -272,7 +299,7 @@ class DVGG19(nn.Module):
     return x
     
 class DVGG19_aug(nn.Module): # augmented DVGG19
-  def __init__(self, input_dim, model=None, fixed=None, gray=False):
+  def __init__(self, input_dim, model=None, fixed=None, gray=False, num_divbranch=1):
     super(DVGG19_aug, self).__init__()
     self.classifier = nn.Sequential(
       nn.Linear(input_dim, 512),
@@ -283,7 +310,7 @@ class DVGG19_aug(nn.Module): # augmented DVGG19
       nn.ReLU(True),
     )
     self.gray = gray
-    self.features = make_layers_dec(cfg["Dec_s_aug"], batch_norm=True)
+    self.features = make_layers_augdec(cfg["Dec_s_aug"], True, num_divbranch)
 
     if model:
      checkpoint = torch.load(model)
@@ -475,7 +502,7 @@ class AutoEncoder_GAN4(nn.Module):
         assert(len(pretrained_model) == 1)
         pretrained_model = pretrained_model[0]
       input_dim = args.num_z + args.num_class
-      self.__setattr__("d" + str(di), Dec(input_dim, pretrained_model, fixed=False, gray=args.gray))
+      self.__setattr__("d" + str(di), Dec(input_dim, pretrained_model, fixed=False, gray=args.gray, num_divbranch=args.num_divbranch))
     for sei in range(1, args.num_se+1):
       self.__setattr__("se" + str(sei), SE(None, fixed=False))
       
