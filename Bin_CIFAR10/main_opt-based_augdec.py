@@ -196,27 +196,6 @@ if __name__ == "__main__":
         if num1.isdigit() and num2.isdigit():
           previous_epoch = int(num1)
           previous_step  = int(num2)
-  
-  
-  # Get the pre-image
-  # pre_image = []
-  # num_step = 150
-  # for cls in range(args.num_class):
-    # created_image = np.uint8(np.random.uniform(0, 255, (32, 32, 3)))
-    # for i in range(num_step): # 150 steps
-      # processed_image = preprocess_image(created_image, False) # normalize
-      # optimizer_preimage = torch.optim.SGD([processed_image], lr=6)
-      # logits = ae.be(processed_image)
-      # activmax_loss = -logits[0, cls]
-      # ae.be.zero_grad()
-      # activmax_loss.backward()
-      # optimizer_preimage.step() # optimize the image
-      # created_image = recreate_image(processed_image) # 0-1 image to 0-255 image
-      # if i == num_step-1:
-        # outpath = pjoin(rec_img_path, "%s_preimage_label=%s.jpg" % (TIME_ID, cls))
-        # vutils.save_image(processed_image.cpu().data.float(), outpath)
-    # pre_image.append(processed_image)
-    
     
   # Optimization
   t1 = time.time(); total_step = 0
