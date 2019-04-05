@@ -89,7 +89,7 @@ cfg = {
     'SE': [32, 32, 'M', 64, 64, 'M', 128, 128, 128, 128, 'M', 256, 256, 256, 256, 'M', 256, 256, 256, 256, 'M'],
     'Dec': ["Up", 512, 512, "Up", 512, 512, "Up", 256, 256, "Up", 128, 128, "Up", 64, 3],
     'Dec_s': ["Up", 128, 128, "Up", 128, 128, "Up", 64, 64, "Up", 32, 32, "Up", 16, 3],
-    'Dec_s_aug': ["Up", 128, 128, "Up", 128, 128, "Up", 64, 64, "Up", "64-2", "8x-4", "Up", "16x-x", "3x-x"],
+    'Dec_s_aug': ["Up", 128, 128, "Up", 128, 128, "Up", 64, 64, "Up", "64-2", "32x-4", "Up", "16x-x", "3x-x"],
     'Dec_s2': ["Up", 256, "Up", 256, "Up", 128, "Up", 64, "Up", 32, 3],
     'Dec_gray': ["Up", 512, 512, "Up", 512, 512, "Up", 256, 256, "Up", 128, 128, "Up", 64, 1],
 }
@@ -135,7 +135,7 @@ def make_layers_dec(cfg, batch_norm=False):
           layers += [conv2d, nn.ReLU(inplace=True)]
       in_channels = v
   return nn.Sequential(*layers)
-  
+ 
 def make_layers_augdec(cfg, batch_norm=False, num_divbranch=1):
   layers = []
   in_channels = 512
@@ -264,7 +264,7 @@ class Normalize(nn.Module):
     return self.normalize(x)
     
 class DVGG19(nn.Module):
-  def __init__(self, input_dim, model=None, fixed=None, gray=False):
+  def __init__(self, input_dim, model=None, fixed=None, gray=False, num_divbranch=1):
     super(DVGG19, self).__init__()
     self.classifier = nn.Sequential(
       nn.Linear(input_dim, 512),
