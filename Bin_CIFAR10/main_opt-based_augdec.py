@@ -219,6 +219,7 @@ if __name__ == "__main__":
         dec = eval("ae.d" + str(di)); optimizer = optimizer_dec[di-1]; ema = ema_dec[di-1]
         imgrecs = torch.split(dec(x), 3, dim=1) # 3 channels
         total_loss = 0
+        imgrec_inner = []
         for imgrec1 in imgrecs:
           feats1 = ae.be.forward_branch(tensor_normalize(imgrec1)); logits1 = feats1[-1]
           imgrec1_DT = ae.defined_trans(imgrec1); logits1_DT = ae.be(tensor_normalize(imgrec1_DT)) # DT: defined transform
@@ -347,8 +348,8 @@ if __name__ == "__main__":
           pred = ae.se1(img.cuda()).detach().max(1)[1]
           test_acc += pred.eq(label.view_as(pred)).sum().cpu().data.numpy()
         test_acc /= float(len(data_test))
-        format_str = "E{}S{} | =======> Test accuracy on SE: {:.4f}"
-        logprint(format_str.format(epoch, step, test_acc))
+        format_str = "E{}S{} | =======> Test accuracy on SE: {:.4f} (ExpID: {})"
+        logprint(format_str.format(epoch, step, test_acc, ExpID))
         torch.save(ae.se1.state_dict(), pjoin(weights_path, "%s_se_E%sS%s_testacc=%.4f.pth" % (ExpID, epoch, step, test_acc)))
         torch.save(ae.d1.state_dict(), pjoin(weights_path, "%s_d1_E%sS%s.pth" % (ExpID, epoch, step)))
         for di in range(2, args.num_dec+1):
