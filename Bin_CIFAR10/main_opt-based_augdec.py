@@ -70,7 +70,6 @@ parser.add_argument('-p', '--project_name', type=str, default="test")
 parser.add_argument('-r', '--resume', action='store_true')
 parser.add_argument('-m', '--mode', type=str, default="GAN4", help='the training mode name.')
 parser.add_argument('--num_epoch', type=int, default=50)
-parser.add_argument('--debug', action="store_true")
 parser.add_argument('--num_class', type=int, default=10)
 parser.add_argument('--use_pseudo_code', action="store_false")
 parser.add_argument('--begin', type=float, default=25)
@@ -118,7 +117,7 @@ if not os.path.exists(weights_path):
   os.makedirs(weights_path)
 
 log_path = pjoin(weights_path, "log_" + ExpID + ".txt")
-args.log = sys.stdout if args.debug else open(log_path, "w+")
+args.log = open(log_path, "w+") if args.CodeID else sys.stdout # Given CodeID, it means this is a formal experiment, i.e., not debugging
   
 if __name__ == "__main__":
   # Set up model
@@ -262,10 +261,12 @@ if __name__ == "__main__":
             imgrec1_2 = imgrec1_2[:,0,:,:] * 0.299 + imgrec1_2[:,1,:,:] * 0.587 + imgrec1_2[:,2,:,:] * 0.114
             lz = torch.mean(torch.abs(imgrec1_1 - imgrec1_2)) / torch.mean(torch.abs(random_z1 - random_z2))
           elif args.msgan_option == "feature":
-            feats1_1, feats1_2 = torch.split(feats1[2], args.batch_size, dim=0)
-            lz = torch.mean(torch.abs(feats1_1 - feats1_2)) / torch.mean(torch.abs(random_z1 - random_z2))
-          eps = 1e-5
-          loss_diversity = args.lw_msgan / (lz + eps)
+            lz = 0
+            for i in range(len(feats1) - 1):
+              feats1_1, feats1_2 = torch.split(feats1[i], args.batch_size, dim=0)
+              lz += torch.mean(torch.abs(feats1_1 - feats1_2)) / torch.mean(torch.abs(random_z1 - random_z2))
+            lz /= len(feats1) - 1
+          loss_diversity = args.lw_msgan / lz
           
           ## Diversity encouraging loss 2
           # ref: 2017 CVPR Diversified Texture Synthesis with Feed-forward Networks
