@@ -88,6 +88,7 @@ parser.add_argument('--history_acc_weight', type=float, default=0.25)
 parser.add_argument('--num_z', type=int, default=100, help="the dimension of hidden z")
 parser.add_argument('--msgan_option', type=str, default="pixel")
 parser.add_argument('--noise_magnitude', type=float, default=0.1)
+parser.add_argument('--CodeID', type=str)
 args = parser.parse_args()
 
 # Update and check args
