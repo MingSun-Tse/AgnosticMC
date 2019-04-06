@@ -217,68 +217,29 @@ if __name__ == "__main__":
       # update decoder
       imgrec_all = []; imgrec_DT_all = []; hardloss_dec_all = []; trainacc_dec_all = []
       for di in range(1, args.num_dec + 1):
-        total_loss = 0
         dec = eval("ae.d" + str(di)); optimizer = optimizer_dec[di-1]; ema = ema_dec[di-1]
-        decfeats_imgrecs = dec.forward_branch(x)
-        decfeats, imgrecs = decfeats_imgrecs[:-1], decfeats_imgrecs[-1]
-        
-        ## Diversity encouraging loss 1: MSGAN
-        # ref: 2019 CVPR Mode Seeking Generative Adversarial Networks for Diverse Image Synthesis
-        lz = 0
-        for decfeat in decfeats:
-          decfeat_1, decfeat_2 = torch.split(decfeat, args.batch_size, dim=0)
-          lz += torch.mean(torch.abs(decfeat_1 - decfeat_2)) / torch.mean(torch.abs(random_z1 - random_z2))
-        lz /= len(decfeats)
-        if args.msgan_option == "pixel":
-          imgrecs_1, imgrecs_2 = torch.split(imgrecs, args.batch_size, dim=0)
-          lz += torch.mean(torch.abs(imgrecs_1 - imgrecs_2)) / torch.mean(torch.abs(random_z1 - random_z2))
-        elif args.msgan_option == "pixelgray":
-          imgrecs_1, imgrecs_2 = torch.split(imgrecs, args.batch_size, dim=0)
-          imgrecs_1 = imgrecs_1[:,0,:,:] * 0.299 + imgrecs_1[:,1,:,:] * 0.587 + imgrecs_1[:,2,:,:] * 0.114
-          imgrecs_2 = imgrecs_2[:,0,:,:] * 0.299 + imgrecs_2[:,1,:,:] * 0.587 + imgrecs_2[:,2,:,:] * 0.114
-          lz += torch.mean(torch.abs(imgrecs_1 - imgrecs_2)) / torch.mean(torch.abs(random_z1 - random_z2))
-        # elif args.msgan_option == "feature":
-          # lz = 0
-          # for i in range(len(feats1) - 1):
-            # feats1_1, feats1_2 = torch.split(feats1[i], args.batch_size, dim=0)
-            # lz += torch.mean(torch.abs(feats1_1 - feats1_2)) / torch.mean(torch.abs(random_z1 - random_z2))
-          # lz /= len(feats1) - 1
-        # elif args.msgan_option == "feature+pixel":
-          # lz = 0
-          # for i in range(len(feats1) - 1):
-            # feats1_1, feats1_2 = torch.split(feats1[i], args.batch_size, dim=0)
-            # lz += torch.mean(torch.abs(feats1_1 - feats1_2)) / torch.mean(torch.abs(random_z1 - random_z2))
-          # lz /= len(feats1) - 1
-          # imgrecs_1, imgrecs_2 = torch.split(imgrec1, args.batch_size, dim=0)
-          # lz += torch.mean(torch.abs(imgrecs_1 - imgrecs_2)) / torch.mean(torch.abs(random_z1 - random_z2))
-        else:
-          logprint("Wrong 'msgan_option'")
-          exit(1)
-        loss_diversity = args.lw_msgan / lz
-        total_loss += loss_diversity
-
-        
-        imgrecs_split = torch.split(imgrecs, 3, dim=1) # 3 channels
+        imgrecs = torch.split(dec(x), 3, dim=1) # 3 channels
+        total_loss = 0
         imgrec_inner = []
-        for imgrec1 in imgrecs_split:
+        for imgrec1 in imgrecs:
           feats1 = ae.be.forward_branch(tensor_normalize(imgrec1)); logits1 = feats1[-1]
           imgrec1_DT = ae.defined_trans(imgrec1); logits1_DT = ae.be(tensor_normalize(imgrec1_DT)) # DT: defined transform
           imgrec_all.append(imgrec1); imgrec_DT_all.append(imgrec1_DT) # for SE
           
-          tvloss = args.lw_tv * (torch.sum(torch.abs(imgrec1[:, :, :, :-1] - imgrec1[:, :, :, 1:])) + 
-                                 torch.sum(torch.abs(imgrec1[:, :, :-1, :] - imgrec1[:, :, 1:, :])))
-          imgnorm = torch.pow(torch.norm(imgrec1, p=6), 6) * args.lw_norm
+          tvloss1 = args.lw_tv * (torch.sum(torch.abs(imgrec1[:, :, :, :-1] - imgrec1[:, :, :, 1:])) + 
+                                  torch.sum(torch.abs(imgrec1[:, :, :-1, :] - imgrec1[:, :, 1:, :])))
+          imgnorm1 = torch.pow(torch.norm(imgrec1, p=6), 6) * args.lw_norm
           
           ## Classification loss, the bottomline loss
           # logprob1 = F.log_softmax(logits1/args.temp, dim=1)
           # logprob2 = F.log_softmax(logits2/args.temp, dim=1)
           # softloss1 = nn.KLDivLoss()(logprob1, prob_gt.data) * (args.temp*args.temp) * args.lw_soft
           # softloss2 = nn.KLDivLoss()(logprob2, prob_gt.data) * (args.temp*args.temp) * args.lw_soft
-          hardloss = nn.CrossEntropyLoss()(logits1, label) * args.lw_hard
-          hardloss_DT = nn.CrossEntropyLoss()(logits1_DT, label) * args.lw_DA
+          hardloss1 = nn.CrossEntropyLoss()(logits1, label) * args.lw_hard
+          hardloss1_DT = nn.CrossEntropyLoss()(logits1_DT, label) * args.lw_DA
           
           pred = logits1.detach().max(1)[1]; trainacc = pred.eq(label.view_as(pred)).sum().cpu().data.numpy() / label.size(0)
-          hardloss_dec_all.append(hardloss.data.cpu().numpy()); trainacc_dec_all.append(trainacc)
+          hardloss_dec_all.append(hardloss1.data.cpu().numpy()); trainacc_dec_all.append(trainacc)
           index = len(imgrec_all) - 1
           history_acc_dec_all[index] = history_acc_dec_all[index] * args.history_acc_weight + trainacc * (1 - args.history_acc_weight)
           
@@ -288,6 +249,32 @@ if __name__ == "__main__":
             se = eval("ae.se" + str(sei))
             logits_dse = se(imgrec1)
             advloss += args.lw_adv / nn.CrossEntropyLoss()(logits_dse, label)
+          
+          ## Diversity encouraging loss 1: MSGAN
+          # ref: 2019 CVPR Mode Seeking Generative Adversarial Networks for Diverse Image Synthesis
+          if args.msgan_option == "pixel":
+            imgrec1_1, imgrec1_2 = torch.split(imgrec1, args.batch_size, dim=0)
+            lz = torch.mean(torch.abs(imgrec1_1 - imgrec1_2)) / torch.mean(torch.abs(random_z1 - random_z2))
+          elif args.msgan_option == "pixelgray":
+            imgrec1_1, imgrec1_2 = torch.split(imgrec1, args.batch_size, dim=0)
+            imgrec1_1 = imgrec1_1[:,0,:,:] * 0.299 + imgrec1_1[:,1,:,:] * 0.587 + imgrec1_1[:,2,:,:] * 0.114
+            imgrec1_2 = imgrec1_2[:,0,:,:] * 0.299 + imgrec1_2[:,1,:,:] * 0.587 + imgrec1_2[:,2,:,:] * 0.114
+            lz = torch.mean(torch.abs(imgrec1_1 - imgrec1_2)) / torch.mean(torch.abs(random_z1 - random_z2))
+          elif args.msgan_option == "feature":
+            lz = 0
+            for i in range(len(feats1) - 1):
+              feats1_1, feats1_2 = torch.split(feats1[i], args.batch_size, dim=0)
+              lz += torch.mean(torch.abs(feats1_1 - feats1_2)) / torch.mean(torch.abs(random_z1 - random_z2))
+            lz /= len(feats1) - 1
+          elif args.msgan_option == "feature+pixel":
+            lz = 0
+            for i in range(len(feats1) - 1):
+              feats1_1, feats1_2 = torch.split(feats1[i], args.batch_size, dim=0)
+              lz += torch.mean(torch.abs(feats1_1 - feats1_2)) / torch.mean(torch.abs(random_z1 - random_z2))
+            lz /= len(feats1) - 1
+            imgrec1_1, imgrec1_2 = torch.split(imgrec1, args.batch_size, dim=0)
+            lz += torch.mean(torch.abs(imgrec1_1 - imgrec1_2)) / torch.mean(torch.abs(random_z1 - random_z2))
+          loss_diversity = args.lw_msgan / lz
           
           ## Diversity encouraging loss 2
           # ref: 2017 CVPR Diversified Texture Synthesis with Feed-forward Networks
@@ -300,12 +287,15 @@ if __name__ == "__main__":
             rand_loss_weight[i, label[i]] = 1
           activmax_loss = -torch.dot(logits1.flatten(), rand_loss_weight.flatten()) / logits1.size(0) * args.lw_actimax
           
+          
           ## Total loss
-          total_loss += hardloss + hardloss_DT + \
-                        advloss + \
-                        tvloss + imgnorm + \
-                        activmax_loss
-                 
+          loss = hardloss1 + hardloss1_DT + \
+                 advloss + \
+                 tvloss1 + imgnorm1 + \
+                 activmax_loss + \
+                 loss_diversity
+          total_loss += loss
+        
         dec.zero_grad()
         total_loss.backward()
               
@@ -396,7 +386,7 @@ if __name__ == "__main__":
             epoch, step,
             *strvalue2,
             *strvalue3,
-            tvloss.data.cpu().numpy(), imgnorm.data.cpu().numpy(), loss_diversity.data.cpu().numpy(),
+            tvloss1.data.cpu().numpy(), imgnorm1.data.cpu().numpy(), loss_diversity.data.cpu().numpy(),
             (time.time()-t1)/args.show_interval))
 
         t1 = time.time()

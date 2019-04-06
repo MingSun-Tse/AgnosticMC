@@ -89,7 +89,7 @@ cfg = {
     'SE': [32, 32, 'M', 64, 64, 'M', 128, 128, 128, 128, 'M', 256, 256, 256, 256, 'M', 256, 256, 256, 256, 'M'],
     'Dec': ["Up", 512, 512, "Up", 512, 512, "Up", 256, 256, "Up", 128, 128, "Up", 64, 3],
     'Dec_s': ["Up", 128, 128, "Up", 128, 128, "Up", 64, 64, "Up", 32, 32, "Up", 16, 3],
-    'Dec_s_aug': ["Up", 128, 128, "Up", 128, 128, "Up", 64, 64, "Up", "64-2", "32x-4", "Up", "16x-x", "3x-x"],
+    'Dec_s_aug': ["Up", 128, 128, "Up", 128, 128, "Up", 64, 64, "Up", 32, 32, "Up", 16, 15],
     'Dec_s2': ["Up", 256, "Up", 256, "Up", 128, "Up", 64, "Up", 32, 3],
     'Dec_gray': ["Up", 512, 512, "Up", 512, 512, "Up", 256, 256, "Up", 128, 128, "Up", 64, 1],
 }
@@ -116,40 +116,7 @@ def make_layers_dec(cfg, batch_norm=False):
     if v == 'Up':
       layers += [nn.UpsamplingNearest2d(scale_factor=2)]
     else: # conv layer
-      if str(v).isdigit():
-        v = v
-        g = 1
-      else:
-        g = int(v.split("g")[1])
-        v = int(v.split("-")[0])
-      conv2d = nn.Conv2d(in_channels, v, kernel_size=3, padding=1, groups=g)
-      if batch_norm:
-        if v == cfg[-1]:
-          layers += [conv2d, nn.BatchNorm2d(v), nn.Sigmoid()] # normalize output image to [0, 1]
-        else: 
-          layers += [conv2d, nn.BatchNorm2d(v), nn.ReLU(inplace=True)]
-      else:
-        if v == cfg[-1]:
-          layers += [conv2d, nn.Sigmoid()] # normalize output image to [0, 1]
-        else: 
-          layers += [conv2d, nn.ReLU(inplace=True)]
-      in_channels = v
-  return nn.Sequential(*layers)
- 
-def make_layers_augdec(cfg, batch_norm=False, num_divbranch=1):
-  layers = []
-  in_channels = 512
-  for v in cfg:
-    if v == 'Up':
-      layers += [nn.UpsamplingNearest2d(scale_factor=2)]
-    else: # conv layer
-      if str(v).isdigit():
-        group = 1
-      else:
-        num_filter, group = v.split("-")
-        v = int(num_filter) if num_filter.isdigit() else int(num_filter.split("x")[0]) * num_divbranch
-        group = int(group) if group.isdigit() else num_divbranch
-      conv2d = nn.Conv2d(in_channels, v, kernel_size=3, padding=1, groups=group)
+      conv2d = nn.Conv2d(in_channels, v, kernel_size=3, padding=1)
       if batch_norm:
         if v == cfg[-1]:
           layers += [conv2d, nn.BatchNorm2d(v), nn.Sigmoid()] # normalize output image to [0, 1]
@@ -178,13 +145,13 @@ class VGG19(nn.Module):
       nn.Linear(512, 10),
     )
     # get layers for forward_branch
-    self.branch_layer = ["f0"] # Convx_1. The first layer, i.e., Conv1_1 is included in default.
+    self.branch_layer = [0] # Convx_1. The first layer, i.e., Conv1_1 is included in default.
     self.features_num_module = len(self.features.module)
     
     for i in range(1, self.features_num_module):
       m = self.features.module[i-1]
       if isinstance(m, nn.MaxPool2d):
-        self.branch_layer.append("f" + str(i))
+        self.branch_layer.append(i)
     
     if model:
      checkpoint = torch.load(model)
@@ -210,7 +177,7 @@ class VGG19(nn.Module):
     for i in range(self.features_num_module):
       m = self.features.module[i]
       x = m(x)
-      if "f" + str(i) in self.branch_layer:
+      if i in self.branch_layer:
         y.append(x)
     x = x.view(x.size(0), -1)
     x = self.classifier(x)
@@ -264,7 +231,7 @@ class Normalize(nn.Module):
     return self.normalize(x)
     
 class DVGG19(nn.Module):
-  def __init__(self, input_dim, model=None, fixed=None, gray=False, num_divbranch=1):
+  def __init__(self, input_dim, model=None, fixed=None, gray=False):
     super(DVGG19, self).__init__()
     self.classifier = nn.Sequential(
       nn.Linear(input_dim, 512),
@@ -299,7 +266,7 @@ class DVGG19(nn.Module):
     return x
     
 class DVGG19_aug(nn.Module): # augmented DVGG19
-  def __init__(self, input_dim, model=None, fixed=None, gray=False, num_divbranch=1):
+  def __init__(self, input_dim, model=None, fixed=None, gray=False):
     super(DVGG19_aug, self).__init__()
     self.classifier = nn.Sequential(
       nn.Linear(input_dim, 512),
@@ -310,11 +277,8 @@ class DVGG19_aug(nn.Module): # augmented DVGG19
       nn.ReLU(True),
     )
     self.gray = gray
-    self.features = make_layers_augdec(cfg["Dec_s_aug"], True, num_divbranch)
-    self.classifier_num_module = len(self.classifier)
-    self.features_num_module = len(self.features)
-    self.branch_layer = ["c5", "f3", "f10", "f17", "f24", "f31"]
-    
+    self.features = make_layers_dec(cfg["Dec_s_aug"], batch_norm=True)
+
     if model:
      checkpoint = torch.load(model)
      self.load_state_dict(checkpoint)
@@ -333,24 +297,8 @@ class DVGG19_aug(nn.Module): # augmented DVGG19
     x = self.classifier(x)
     x = x.view(x.size(0), 512, 1, 1)
     x = self.features(x)
-    x = torch.stack([x] * 3, dim=1).squeeze(2) if self.gray else x
+    x = torch.stack([x]*3, dim=1).squeeze(2) if self.gray else x
     return x
-    
-  def forward_branch(self, x):
-    y = []
-    for ci in range(self.classifier_num_module):
-      m = self.classifier[ci]
-      x = m(x)
-      if "c" + str(ci) in self.branch_layer:
-        y.append(x)
-    x = x.view(x.size(0), 512, 1, 1)
-    for fi in range(self.features_num_module):
-      m = self.features[fi]
-      x = m(x)
-      if "f" + str(fi) in self.branch_layer:
-        y.append(x)
-    y.append(x)
-    return y
     
 class DVGG19_deconv(nn.Module):
   def __init__(self, input_dim, model=None, fixed=None, gray=False, d=128):
@@ -505,7 +453,7 @@ class Transform8(nn.Module): # random transform combination
 # ---------------------------------------------------
 # AutoEncoder part
 BE  = VGG19      # Big Encoder
-Dec = DVGG19_aug # Decoder
+Dec = DVGG19     # Decoder
 SE  = SmallVGG19 # Small Encoder
 
 class AutoEncoder_GAN4(nn.Module):
@@ -521,7 +469,7 @@ class AutoEncoder_GAN4(nn.Module):
         assert(len(pretrained_model) == 1)
         pretrained_model = pretrained_model[0]
       input_dim = args.num_z + args.num_class
-      self.__setattr__("d" + str(di), Dec(input_dim, pretrained_model, fixed=False, gray=args.gray, num_divbranch=args.num_divbranch))
+      self.__setattr__("d" + str(di), Dec(input_dim, pretrained_model, fixed=False, gray=args.gray))
     for sei in range(1, args.num_se+1):
       self.__setattr__("se" + str(sei), SE(None, fixed=False))
       

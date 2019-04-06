@@ -178,13 +178,13 @@ class VGG19(nn.Module):
       nn.Linear(512, 10),
     )
     # get layers for forward_branch
-    self.branch_layer = ["f0"] # Convx_1. The first layer, i.e., Conv1_1 is included in default.
+    self.branch_layer = [0] # Convx_1. The first layer, i.e., Conv1_1 is included in default.
     self.features_num_module = len(self.features.module)
     
     for i in range(1, self.features_num_module):
       m = self.features.module[i-1]
       if isinstance(m, nn.MaxPool2d):
-        self.branch_layer.append("f" + str(i))
+        self.branch_layer.append(i)
     
     if model:
      checkpoint = torch.load(model)
@@ -210,7 +210,7 @@ class VGG19(nn.Module):
     for i in range(self.features_num_module):
       m = self.features.module[i]
       x = m(x)
-      if "f" + str(i) in self.branch_layer:
+      if i in self.branch_layer:
         y.append(x)
     x = x.view(x.size(0), -1)
     x = self.classifier(x)
@@ -311,10 +311,7 @@ class DVGG19_aug(nn.Module): # augmented DVGG19
     )
     self.gray = gray
     self.features = make_layers_augdec(cfg["Dec_s_aug"], True, num_divbranch)
-    self.classifier_num_module = len(self.classifier)
-    self.features_num_module = len(self.features)
-    self.branch_layer = ["c5", "f3", "f10", "f17", "f24", "f31"]
-    
+
     if model:
      checkpoint = torch.load(model)
      self.load_state_dict(checkpoint)
@@ -333,24 +330,8 @@ class DVGG19_aug(nn.Module): # augmented DVGG19
     x = self.classifier(x)
     x = x.view(x.size(0), 512, 1, 1)
     x = self.features(x)
-    x = torch.stack([x] * 3, dim=1).squeeze(2) if self.gray else x
+    x = torch.stack([x]*3, dim=1).squeeze(2) if self.gray else x
     return x
-    
-  def forward_branch(self, x):
-    y = []
-    for ci in range(self.classifier_num_module):
-      m = self.classifier[ci]
-      x = m(x)
-      if "c" + str(ci) in self.branch_layer:
-        y.append(x)
-    x = x.view(x.size(0), 512, 1, 1)
-    for fi in range(self.features_num_module):
-      m = self.features[fi]
-      x = m(x)
-      if "f" + str(fi) in self.branch_layer:
-        y.append(x)
-    y.append(x)
-    return y
     
 class DVGG19_deconv(nn.Module):
   def __init__(self, input_dim, model=None, fixed=None, gray=False, d=128):
