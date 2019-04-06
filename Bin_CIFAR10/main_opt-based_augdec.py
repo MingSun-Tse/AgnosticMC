@@ -255,7 +255,7 @@ if __name__ == "__main__":
         else:
           logprint("Wrong 'msgan_option'")
           exit(1)
-        loss_diversity = -args.lw_msgan * lz
+        loss_diversity = args.lw_msgan / lz
         total_loss += loss_diversity
 
         
@@ -299,7 +299,7 @@ if __name__ == "__main__":
           activmax_loss = 0
           for i in range(logits1.size(0)):
             rand_loss_weight[i, label[i]] = 1
-          activmax_loss = -torch.dot(logits1.flatten(), rand_loss_weight.flatten()) / logits1.size(0) * args.lw_actimax
+          activmax_loss = args.lw_actimax / (torch.dot(logits1.flatten(), rand_loss_weight.flatten()) / logits1.size(0))
           
           ## Total loss
           total_loss += hardloss + hardloss_DT + \
