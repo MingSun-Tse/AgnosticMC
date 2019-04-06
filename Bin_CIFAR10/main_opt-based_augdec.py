@@ -280,7 +280,7 @@ if __name__ == "__main__":
           # ref: 2017 CVPR Diversified Texture Synthesis with Feed-forward Networks
           
           ## Activation maximization loss
-          args.lw_actimax = max(args.lw_actimax - args.lw_actimax / 6.0 * epoch, 0)
+          args.lw_actimax = max(args.lw_actimax - args.lw_actimax / 10.0 * epoch, 0)
           rand_loss_weight = torch.rand_like(logits1) * args.noise_magnitude
           activmax_loss = 0
           for i in range(logits1.size(0)):
