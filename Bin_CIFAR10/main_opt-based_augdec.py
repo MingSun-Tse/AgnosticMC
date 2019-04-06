@@ -88,6 +88,7 @@ parser.add_argument('--num_z', type=int, default=100, help="the dimension of hid
 parser.add_argument('--msgan_option', type=str, default="pixel")
 parser.add_argument('--noise_magnitude', type=float, default=0.1)
 parser.add_argument('--CodeID', type=str)
+parser.add_argument('--clip_actimax', action="store_true")
 args = parser.parse_args()
 
 # Update and check args
@@ -293,7 +294,7 @@ if __name__ == "__main__":
           # ref: 2017 CVPR Diversified Texture Synthesis with Feed-forward Networks
           
           ## Activation maximization loss
-          if epoch >= 7: args.lw_actimax = 0
+          if args.clip_actimax and epoch >= 7: args.lw_actimax = 0
           rand_loss_weight = torch.rand_like(logits1) * args.noise_magnitude
           activmax_loss = 0
           for i in range(logits1.size(0)):
