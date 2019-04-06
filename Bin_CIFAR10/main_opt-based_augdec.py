@@ -274,7 +274,7 @@ if __name__ == "__main__":
           activmax_loss = 0
           for i in range(logits1.size(0)):
             rand_loss_weight[i, label[i]] = 1
-          activmax_loss = -torch.dot(logits1, rand_loss_weight) / logits1.size(0) * args.lw_actimax
+          activmax_loss = -torch.dot(logits1.flatten(), rand_loss_weight.flatten()) / logits1.size(0) * args.lw_actimax
           
           ## Total loss
           loss = hardloss1 + hardloss1_DT + \
