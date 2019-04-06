@@ -269,9 +269,13 @@ if __name__ == "__main__":
           # ref: 2017 CVPR Diversified Texture Synthesis with Feed-forward Networks
           
           ## Activation maximization loss
+          rand_loss_weight = torch.rand_like(logits1) * 0.5
           activmax_loss = 0
           for i in range(logits1.size(0)):
+            rand_loss_weight[i, label[i]] = 1
+            
             activmax_loss += -logits1[i, label[i]] * args.lw_actimax
+            
           activmax_loss /= logits1.size(0)
           
           ## Total loss
