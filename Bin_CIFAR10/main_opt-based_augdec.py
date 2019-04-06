@@ -255,7 +255,7 @@ if __name__ == "__main__":
         else:
           logprint("Wrong 'msgan_option'")
           exit(1)
-        loss_diversity = args.lw_msgan / lz
+        loss_diversity = -args.lw_msgan * lz
         total_loss += loss_diversity
 
         
