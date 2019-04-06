@@ -266,6 +266,14 @@ if __name__ == "__main__":
               feats1_1, feats1_2 = torch.split(feats1[i], args.batch_size, dim=0)
               lz += torch.mean(torch.abs(feats1_1 - feats1_2)) / torch.mean(torch.abs(random_z1 - random_z2))
             lz /= len(feats1) - 1
+          elif args.msgan_option == "feature+pixel":
+            lz = 0
+            for i in range(len(feats1) - 1):
+              feats1_1, feats1_2 = torch.split(feats1[i], args.batch_size, dim=0)
+              lz += torch.mean(torch.abs(feats1_1 - feats1_2)) / torch.mean(torch.abs(random_z1 - random_z2))
+            lz /= len(feats1) - 1
+            imgrec1_1, imgrec1_2 = torch.split(imgrec1, args.batch_size, dim=0)
+            lz += torch.mean(torch.abs(imgrec1_1 - imgrec1_2)) / torch.mean(torch.abs(random_z1 - random_z2))
           loss_diversity = args.lw_msgan / lz
           
           ## Diversity encouraging loss 2
