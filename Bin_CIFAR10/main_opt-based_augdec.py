@@ -87,6 +87,7 @@ parser.add_argument('--acc_thre_reset_dec', type=float, default=0)
 parser.add_argument('--history_acc_weight', type=float, default=0.25)
 parser.add_argument('--num_z', type=int, default=100, help="the dimension of hidden z")
 parser.add_argument('--msgan_option', type=str, default="pixel")
+parser.add_argument('--noise_magnitude', type=float, default=0.1)
 args = parser.parse_args()
 
 # Update and check args
@@ -269,14 +270,11 @@ if __name__ == "__main__":
           # ref: 2017 CVPR Diversified Texture Synthesis with Feed-forward Networks
           
           ## Activation maximization loss
-          rand_loss_weight = torch.rand_like(logits1) * 0.5
+          rand_loss_weight = torch.rand_like(logits1) * args.noise_magnitude
           activmax_loss = 0
           for i in range(logits1.size(0)):
             rand_loss_weight[i, label[i]] = 1
-            
-            activmax_loss += -logits1[i, label[i]] * args.lw_actimax
-            
-          activmax_loss /= logits1.size(0)
+          activmax_loss = -torch.dot(logits1, rand_loss_weight) / logits1.size(0) * args.lw_actimax
           
           ## Total loss
           loss = hardloss1 + hardloss1_DT + \
