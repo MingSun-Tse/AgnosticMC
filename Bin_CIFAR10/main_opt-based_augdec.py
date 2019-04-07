@@ -227,19 +227,20 @@ if __name__ == "__main__":
         
         ## Diversity encouraging loss 1: MSGAN
         # ref: 2019 CVPR Mode Seeking Generative Adversarial Networks for Diverse Image Synthesis
-        lz = 0
+        lz_feat = 0
         for decfeat in decfeats:
           decfeat_1, decfeat_2 = torch.split(decfeat, args.batch_size, dim=0)
-          lz += torch.mean(torch.abs(decfeat_1 - decfeat_2)) / torch.mean(torch.abs(random_z1 - random_z2))
-        lz /= len(decfeats)
+          lz_feat += torch.mean(torch.abs(decfeat_1 - decfeat_2)) / torch.mean(torch.abs(random_z1 - random_z2)) * 0.1
+        lz_feat /= len(decfeats)
+        lz_pixel = 0
         if args.msgan_option == "pixel":
           imgrecs_1, imgrecs_2 = torch.split(imgrecs, args.batch_size, dim=0)
-          lz += torch.mean(torch.abs(imgrecs_1 - imgrecs_2)) / torch.mean(torch.abs(random_z1 - random_z2))
+          lz_pixel += torch.mean(torch.abs(imgrecs_1 - imgrecs_2)) / torch.mean(torch.abs(random_z1 - random_z2))
         elif args.msgan_option == "pixelgray":
           imgrecs_1, imgrecs_2 = torch.split(imgrecs, args.batch_size, dim=0)
           imgrecs_1 = imgrecs_1[:,0,:,:] * 0.299 + imgrecs_1[:,1,:,:] * 0.587 + imgrecs_1[:,2,:,:] * 0.114
           imgrecs_2 = imgrecs_2[:,0,:,:] * 0.299 + imgrecs_2[:,1,:,:] * 0.587 + imgrecs_2[:,2,:,:] * 0.114
-          lz += torch.mean(torch.abs(imgrecs_1 - imgrecs_2)) / torch.mean(torch.abs(random_z1 - random_z2))
+          lz_pixel += torch.mean(torch.abs(imgrecs_1 - imgrecs_2)) / torch.mean(torch.abs(random_z1 - random_z2))
         # elif args.msgan_option == "feature":
           # lz = 0
           # for i in range(len(feats1) - 1):
@@ -257,7 +258,9 @@ if __name__ == "__main__":
         else:
           logprint("Wrong 'msgan_option'")
           exit(1)
-        loss_diversity = -args.lw_msgan * lz
+        loss_diversity_feat  = -args.lw_msgan * lz_feat
+        loss_diversity_pixel = -args.lw_msgan * lz_pixel
+        loss_diversity = loss_diversity_feat + loss_diversity_pixel
         total_loss += loss_diversity
 
         
@@ -281,8 +284,8 @@ if __name__ == "__main__":
           hardloss = nn.CrossEntropyLoss()(logits1, label) * args.lw_hard
           hardloss_DT = nn.CrossEntropyLoss()(logits1_DT, label) * args.lw_DA
           
-          pred = logits1.detach().max(1)[1]; trainacc = pred.eq(label.view_as(pred)).sum().cpu().data.numpy() / label.size(0)
-          hardloss_dec_all.append(hardloss.data.cpu().numpy()); trainacc_dec_all.append(trainacc)
+          pred = logits1.detach().max(1)[1]; trainacc = pred.eq(label.view_as(pred)).sum().item() / label.size(0)
+          hardloss_dec_all.append(hardloss.item()); trainacc_dec_all.append(trainacc)
           index = len(imgrec_all) - 1
           history_acc_dec_all[index] = history_acc_dec_all[index] * args.history_acc_weight + trainacc * (1 - args.history_acc_weight)
           
@@ -303,9 +306,11 @@ if __name__ == "__main__":
           for i in range(logits1.size(0)):
             rand_loss_weight[i, label[i]] = 1
           actimax_loss = -args.lw_actimax * (torch.dot(logits1.flatten(), rand_loss_weight.flatten()) / logits1.size(0))
-          actimax_loss_print.append(actimax_loss.data.cpu().numpy())
-          loss_actimax_diversity_attraction = (actimax_loss - loss_diversity.data - 30) * (actimax_loss - loss_diversity.data - 30) if actimax_loss > loss_diversity + 30 else 0
-          
+          actimax_loss_print.append(actimax_loss.item())
+          if args.lw_actimax:
+            loss_actimax_diversity_attraction = (actimax_loss - loss_diversity.data - 30) * (actimax_loss - loss_diversity.data - 30) if actimax_loss > loss_diversity + 30 else 0
+          else:
+            loss_actimax_diversity_attraction = 0
           ## Total loss
           total_loss += hardloss + hardloss_DT + \
                         advloss + \
@@ -336,8 +341,8 @@ if __name__ == "__main__":
           hardloss = nn.CrossEntropyLoss()(logits, label) * args.lw_hard
           hardloss_DT = nn.CrossEntropyLoss()(logits_DT, label) * args.lw_DA
           loss_se += hardloss + hardloss_DT
-          pred = logits.detach().max(1)[1]; trainacc = pred.eq(label.view_as(pred)).sum().cpu().data.numpy() / label.size(0)
-          hardloss_se_all.append(hardloss.data.cpu().numpy()); trainacc_se_all.append(trainacc)
+          pred = logits.detach().max(1)[1]; trainacc = pred.eq(label.view_as(pred)).sum().item() / label.size(0)
+          hardloss_se_all.append(hardloss.item()); trainacc_se_all.append(trainacc)
           history_acc_se_all[i] = history_acc_se_all[i] * args.history_acc_weight + trainacc * (1 - args.history_acc_weight)
         
         loss_se.backward()
@@ -376,7 +381,7 @@ if __name__ == "__main__":
         for i, (img, label) in enumerate(test_loader):
           label = label.cuda()
           pred = ae.se1(img.cuda()).detach().max(1)[1]
-          test_acc += pred.eq(label.view_as(pred)).sum().cpu().data.numpy()
+          test_acc += pred.eq(label.view_as(pred)).sum().item()
         test_acc /= float(len(data_test))
         format_str = "E{:<%s}S{:<%s} | " % (num_digit_show_epoch, num_digit_show_step) + "=" * (int(TimeID[-1]) + 1) + "> Test accuracy on SE: {:.4f} (ExpID: {})"
         logprint(format_str.format(epoch, step, test_acc, ExpID))
@@ -391,7 +396,7 @@ if __name__ == "__main__":
         format_str1 = "E{:<%s}S{:<%s}" % (num_digit_show_epoch, num_digit_show_step)
         format_str2 = " | dec:" + " {:.3f}({:.3f}-{:.3f})" * args.num_dec * args.num_divbranch
         format_str3 = " | se:" + " {:.3f}({:.3f}-{:.3f})" * args.num_dec * args.num_divbranch 
-        format_str4 = " | tv: {:.3f} norm: {:.3f} diversity: {:.3f} actimax: {:.3f}"
+        format_str4 = " | tv: {:.3f} norm: {:.3f} diversity: {:.3f} {:.3f} actimax: {:.3f}"
         format_str5 = " ({:.3f}s/step)"
         format_str = "".join([format_str1, format_str2, format_str3, format_str4, format_str5])
         strvalue2 = []; strvalue3 = []
@@ -402,7 +407,7 @@ if __name__ == "__main__":
             epoch, step,
             *strvalue2,
             *strvalue3,
-            tvloss.data.cpu().numpy(), imgnorm.data.cpu().numpy(), loss_diversity.data.cpu().numpy(), np.average(actimax_loss_print),
+            tvloss.item(), imgnorm.item(), loss_diversity_feat.item(), loss_diversity_pixel.item(), np.average(actimax_loss_print),
             (time.time()-t1)/args.show_interval))
 
         t1 = time.time()
