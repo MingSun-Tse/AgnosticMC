@@ -304,12 +304,14 @@ if __name__ == "__main__":
             rand_loss_weight[i, label[i]] = 1
           actimax_loss = -args.lw_actimax * (torch.dot(logits1.flatten(), rand_loss_weight.flatten()) / logits1.size(0))
           actimax_loss_print.append(actimax_loss.data.cpu().numpy())
+          loss_actimax_diversity_attraction = (actimax_loss - loss_diversity.data) * (actimax_loss - loss_diversity.data) if actimax_loss > loss_diversity else 0
+          print(loss_actimax_diversity_attraction.data.cpu().numpy())
           
           ## Total loss
           total_loss += hardloss + hardloss_DT + \
                         advloss + \
                         tvloss + imgnorm + \
-                        actimax_loss
+                        actimax_loss + loss_actimax_diversity_attraction 
                  
         dec.zero_grad()
         total_loss.backward()
