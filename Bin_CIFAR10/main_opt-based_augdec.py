@@ -86,7 +86,7 @@ parser.add_argument('--acc_thre_reset_dec', type=float, default=0)
 parser.add_argument('--history_acc_weight', type=float, default=0.25)
 parser.add_argument('--num_z', type=int, default=100, help="the dimension of hidden z")
 parser.add_argument('--msgan_option', type=str, default="pixel")
-parser.add_argument('--noise_magnitude', type=float, default=0.1)
+parser.add_argument('--noise_magnitude', type=float, default=0)
 parser.add_argument('--CodeID', type=str)
 parser.add_argument('--clip_actimax', action="store_true")
 args = parser.parse_args()
@@ -263,6 +263,7 @@ if __name__ == "__main__":
         
         imgrecs_split = torch.split(imgrecs, 3, dim=1) # 3 channels
         imgrec_inner = []
+        actimax_loss_print = []
         for imgrec1 in imgrecs_split:
           feats1 = ae.be.forward_branch(tensor_normalize(imgrec1)); logits1 = feats1[-1]
           imgrec1_DT = ae.defined_trans(imgrec1); logits1_DT = ae.be(tensor_normalize(imgrec1_DT)) # DT: defined transform
@@ -298,16 +299,17 @@ if __name__ == "__main__":
           ## Activation maximization loss
           if args.clip_actimax and epoch >= 7: args.lw_actimax = 0
           rand_loss_weight = torch.rand_like(logits1) * args.noise_magnitude
-          activmax_loss = 0
+          actimax_loss = 0
           for i in range(logits1.size(0)):
             rand_loss_weight[i, label[i]] = 1
-          activmax_loss = args.lw_actimax / (torch.dot(logits1.flatten(), rand_loss_weight.flatten()) / logits1.size(0))
+          actimax_loss = -args.lw_actimax * (torch.dot(logits1.flatten(), rand_loss_weight.flatten()) / logits1.size(0))
+          actimax_loss_print.append(actimax_loss.data.cpu().numpy())
           
           ## Total loss
           total_loss += hardloss + hardloss_DT + \
                         advloss + \
                         tvloss + imgnorm + \
-                        activmax_loss
+                        actimax_loss
                  
         dec.zero_grad()
         total_loss.backward()
@@ -388,7 +390,7 @@ if __name__ == "__main__":
         format_str1 = "E{:<%s}S{:<%s}" % (num_digit_show_epoch, num_digit_show_step)
         format_str2 = " | dec:" + " {:.3f}({:.3f}-{:.3f})" * args.num_dec * args.num_divbranch
         format_str3 = " | se:" + " {:.3f}({:.3f}-{:.3f})" * args.num_dec * args.num_divbranch 
-        format_str4 = " | tv: {:.3f} norm: {:.3f} diversity: {:.3f}"
+        format_str4 = " | tv: {:.3f} norm: {:.3f} diversity: {:.3f} actimax: {:.3f}"
         format_str5 = " ({:.3f}s/step)"
         format_str = "".join([format_str1, format_str2, format_str3, format_str4, format_str5])
         strvalue2 = []; strvalue3 = []
@@ -399,7 +401,7 @@ if __name__ == "__main__":
             epoch, step,
             *strvalue2,
             *strvalue3,
-            tvloss.data.cpu().numpy(), imgnorm.data.cpu().numpy(), loss_diversity.data.cpu().numpy(),
+            tvloss.data.cpu().numpy(), imgnorm.data.cpu().numpy(), loss_diversity.data.cpu().numpy(), np.average(actimax_loss_print),
             (time.time()-t1)/args.show_interval))
 
         t1 = time.time()
