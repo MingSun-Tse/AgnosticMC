@@ -199,8 +199,10 @@ if __name__ == "__main__":
         if num1.isdigit() and num2.isdigit():
           previous_epoch = int(num1)
           previous_step  = int(num2)
-    
+  
   # Optimization
+  num_digit_show_step  = len(str(int(len(data_train) / args.batch_size)))
+  num_digit_show_epoch = len(str(args.num_epoch))
   t1 = time.time()
   for epoch in range(previous_epoch, args.num_epoch):
     for step, (img, label) in enumerate(train_loader):
@@ -348,7 +350,7 @@ if __name__ == "__main__":
         ae.enc = ae.be
         ae.eval()
         # save some test images
-        logprint("E{}S{} | Saving image samples".format(epoch, step))
+        logprint(("E{:<%s}S{:<%s} | Saving image samples" % (num_digit_show_epoch, num_digit_show_step)).format(epoch, step))
         onehot_label = torch.eye(args.num_class)
         test_codes = torch.cat([torch.randn([args.num_class, args.num_z]), onehot_label], dim=1)
         test_labels = onehot_label.numpy().argmax(axis=1)        
@@ -373,7 +375,7 @@ if __name__ == "__main__":
           pred = ae.se1(img.cuda()).detach().max(1)[1]
           test_acc += pred.eq(label.view_as(pred)).sum().cpu().data.numpy()
         test_acc /= float(len(data_test))
-        format_str = "E{}S{} | =======> Test accuracy on SE: {:.4f} (ExpID: {})"
+        format_str = "E{:<%s}S{:<%s} | =======> Test accuracy on SE: {:.4f} (ExpID: {})" % (num_digit_show_epoch, num_digit_show_step)
         logprint(format_str.format(epoch, step, test_acc, ExpID))
         torch.save(ae.se1.state_dict(), pjoin(weights_path, "%s_se_E%sS%s_testacc=%.4f.pth" % (ExpID, epoch, step, test_acc)))
         torch.save(ae.d1.state_dict(), pjoin(weights_path, "%s_d1_E%sS%s.pth" % (ExpID, epoch, step)))
@@ -383,7 +385,7 @@ if __name__ == "__main__":
 
       # Print training loss
       if step % args.show_interval == 0:
-        format_str1 = "E{}S{}"
+        format_str1 = "E{:<%s}S{:<%s}" % (num_digit_show_epoch, num_digit_show_step)
         format_str2 = " | dec:" + " {:.3f}({:.3f}-{:.3f})" * args.num_dec * args.num_divbranch
         format_str3 = " | se:" + " {:.3f}({:.3f}-{:.3f})" * args.num_dec * args.num_divbranch 
         format_str4 = " | tv: {:.3f} norm: {:.3f} diversity: {:.3f}"
