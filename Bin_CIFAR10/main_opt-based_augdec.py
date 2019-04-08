@@ -129,13 +129,18 @@ if __name__ == "__main__":
   # Set up exponential moving average
   history_acc_se_all = []
   history_acc_dec_all = []
-  ema_dec = []; ema_se = []
+  ema_dec = []; ema_se = []; ema_mask = []
   for di in range(1, args.num_dec+1):
     ema_dec.append(EMA(args.ema_factor))
+    ema_mask.append(EMA(args.ema_factor))
     dec = eval("ae.d%s"  % di)
+    mask_net = ae.mask
     for name, param in dec.named_parameters():
       if param.requires_grad:
         ema_dec[-1].register(name, param.data)
+    for name, param in mask_net.named_parameters():
+      if param.requires_grad:
+        ema_mask[-1].register(name, param.data)
     for _ in range(args.num_divbranch):
       history_acc_se_all.append(0)
       history_acc_dec_all.append(0)
@@ -183,12 +188,15 @@ if __name__ == "__main__":
   # Optimizer
   optimizer_se  = [] 
   optimizer_dec = []
+  optimizer_mask = []
   for di in range(1, args.num_dec+1):
     dec = eval("ae.d"+str(di))
-    optimizer_dec.append(torch.optim.Adam(dec.parameters(),  lr=args.lr, betas=(args.b1, args.b2)))
+    mask_net = ae.mask
+    optimizer_dec.append(torch.optim.Adam(dec.parameters(), lr=args.lr, betas=(args.b1, args.b2)))
+    optimizer_mask.append(torch.optim.Adam(mask_net.parameters(), lr=args.lr, betas=(args.b1, args.b2)))
   for sei in range(1, args.num_se+1):
     se = eval("ae.se" + str(sei))
-    optimizer_se.append(torch.optim.Adam(se.parameters(),  lr=args.lr, betas=(args.b1, args.b2)))
+    optimizer_se.append(torch.optim.Adam(se.parameters(), lr=args.lr, betas=(args.b1, args.b2)))
       
   # Resume previous step
   previous_epoch = previous_step = 0
@@ -218,13 +226,26 @@ if __name__ == "__main__":
       label = label_concat.data.cpu().numpy().argmax(axis=1)
       label = torch.from_numpy(label).long().detach().cuda()
         
-      # update decoder
+      # Update decoder
       imgrec_all = []; imgrec_DT_all = []; hardloss_dec_all = []; trainacc_dec_all = []
       for di in range(1, args.num_dec + 1):
         total_loss = 0
         dec = eval("ae.d" + str(di)); optimizer = optimizer_dec[di-1]; ema = ema_dec[di-1]
+        mask_net = ae.mask; optimizer_m = optimizer_mask[di-1]; ema_m = ema_mask[di-1]
+        
+        # forward
         decfeats_imgrecs = dec.forward_branch(x)
-        decfeats, imgrecs = decfeats_imgrecs[:-1], decfeats_imgrecs[-1]
+        decfeats, imgrecs_ = decfeats_imgrecs[:-1], decfeats_imgrecs[-1]
+        mask = mask_net(x)
+        imgrecs = torch.zeros_like(imgrecs_).cuda()
+        for i in range(imgrecs_.size(1)):
+          imgrecs[:,i,:,:] = mask.squeeze(1).mul(imgrecs_[:,i,:,:])
+          
+        # saliency mask
+        loss_mask_norm = torch.norm(mask, p=1) * 1e-5 # for sparsity
+        mask_1, mask_2 = torch.split(mask, args.batch_size, dim=0)
+        loss_mask_diversity = -torch.mean(torch.abs(mask_1 - mask_2)) / torch.mean(torch.abs(random_z1 - random_z2)) * 100
+        total_loss += loss_mask_diversity + loss_mask_norm
         
         ## Diversity encouraging loss 1: MSGAN
         # ref: 2019 CVPR Mode Seeking Generative Adversarial Networks for Diverse Image Synthesis
@@ -264,7 +285,6 @@ if __name__ == "__main__":
         loss_diversity = loss_diversity_feat + loss_diversity_pixel
         total_loss += loss_diversity
 
-        
         imgrecs_split = torch.split(imgrecs, 3, dim=1) # 3 channels
         imgrec_inner = []
         actimax_loss_print = []
@@ -320,6 +340,7 @@ if __name__ == "__main__":
                         actimax_loss + loss_actimax_diversity_attraction 
                  
         dec.zero_grad()
+        mask_net.zero_grad()
         total_loss.backward()
       
       ## Gradient checking
@@ -337,12 +358,16 @@ if __name__ == "__main__":
       # Update params
       for di in range(1, args.num_dec + 1):
         dec = eval("ae.d" + str(di)); optimizer = optimizer_dec[di-1]; ema = ema_dec[di-1]
-        optimizer.step()
+        mask_net = ae.mask; optimizer_m = optimizer_mask[di-1]; ema_m = ema_mask[di-1]
+        optimizer.step(); optimizer_m.step()
         for name, param in dec.named_parameters():
           if param.requires_grad:
             param.data = ema(name, param.data)
-
-      # Update SE
+        for name, param in mask_net.named_parameters():
+          if param.requires_grad:
+            param.data = ema_m(name, param.data)
+     
+     # Update SE
       hardloss_se_all = []; trainacc_se_all = []
       for sei in range(1, args.num_se+1):
         se = eval("ae.se" + str(sei)); optimizer = optimizer_se[sei-1]; ema = ema_se[sei-1]
@@ -380,8 +405,13 @@ if __name__ == "__main__":
           x = test_codes[i].cuda()
           x = x.unsqueeze(0)
           for di in range(1, args.num_dec+1):
-            dec = eval("ae.d%s" % di)
-            imgs = torch.split(dec(x), 3, dim=1)
+            dec = eval("ae.d%s" % di); mask_net = ae.mask
+            imgrecs_ = dec(x); mask = mask_net(x)
+            imgrecs = torch.zeros_like(imgrecs_).cuda()
+            for k in range(imgrecs_.size(1)):
+              imgrecs[:,k,:,:] = mask.squeeze(1).mul(imgrecs_[:,k,:,:])
+            
+            imgs = torch.split(imgrecs, 3, dim=1)
             for j in range(len(imgs)):
               img1 = imgs[j]
               out_img1_path = pjoin(rec_img_path, "%s_E%sS%s_imgrec%s_label=%s_d%s_%s.jpg" % (ExpID, epoch, step, i, test_labels[i], di, j))
@@ -410,7 +440,7 @@ if __name__ == "__main__":
         format_str1 = "E{:<%s}S{:<%s}" % (num_digit_show_epoch, num_digit_show_step)
         format_str2 = " | dec:" + " {:.3f}({:.3f}-{:.3f})" * args.num_dec * args.num_divbranch
         format_str3 = " | se:" + " {:.3f}({:.3f}-{:.3f})" * args.num_dec * args.num_divbranch 
-        format_str4 = " | tv: {:.3f} norm: {:.3f} diversity: {:.3f} {:.3f} actimax: {:.3f}"
+        format_str4 = " | tv: {:.3f} norm: {:.3f} diversity: {:.3f} {:.3f} actimax: {:.3f} mask_diversity: {:.3f} mask_norm: {:.3f}"
         format_str5 = " ({:.3f}s/step)"
         format_str = "".join([format_str1, format_str2, format_str3, format_str4, format_str5])
         strvalue2 = []; strvalue3 = []
@@ -422,6 +452,7 @@ if __name__ == "__main__":
             *strvalue2,
             *strvalue3,
             tvloss.item(), imgnorm.item(), loss_diversity_feat.item(), loss_diversity_pixel.item(), np.average(actimax_loss_print),
+            loss_mask_diversity.item(), loss_mask_norm.item(),
             (time.time()-t1)/args.show_interval))
 
         t1 = time.time()

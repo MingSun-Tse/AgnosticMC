@@ -90,6 +90,7 @@ cfg = {
     'Dec': ["Up", 512, 512, "Up", 512, 512, "Up", 256, 256, "Up", 128, 128, "Up", 64, 3],
     'Dec_s': ["Up", 128, 128, "Up", 128, 128, "Up", 64, 64, "Up", 32, 32, "Up", 16, 3],
     'Dec_s_aug': ["Up", 128, 128, "Up", 128, 128, "Up", 64, 64, "Up", "64-2", "32x-4", "Up", "16x-x", "3x-x"],
+    'Mask': ["Up", 64, 64, "Up", 64, 64, "Up", 32, 32, "Up", 32, 32, "Up", 16, 1],
     'Dec_s2': ["Up", 256, "Up", 256, "Up", 128, "Up", 64, "Up", 32, 3],
     'Dec_gray': ["Up", 512, 512, "Up", 512, 512, "Up", 256, 256, "Up", 128, 128, "Up", 64, 1],
 }
@@ -352,6 +353,37 @@ class DVGG19_aug(nn.Module): # augmented DVGG19
     y.append(x)
     return y
     
+class SaliencyMask(nn.Module):
+  def __init__(self, input_dim, model=None, fixed=None, gray=False, num_divbranch=1):
+    super(SaliencyMask, self).__init__()
+    self.classifier = nn.Sequential(
+      nn.Linear(input_dim, 512),
+      nn.ReLU(True),
+      nn.Linear(512, 512),
+      nn.ReLU(True),
+    )
+    self.features = make_layers_dec(cfg["Mask"])
+    
+    if model:
+     checkpoint = torch.load(model)
+     self.load_state_dict(checkpoint)
+    else:
+      for m in self.modules():
+        if isinstance(m, nn.Conv2d):
+          n = m.kernel_size[0] * m.kernel_size[1] * m.out_channels
+          m.weight.data.normal_(0, math.sqrt(2. / n))
+          m.bias.data.zero_()
+
+    if fixed:
+      for param in self.parameters():
+          param.requires_grad = False
+          
+  def forward(self, x):
+    x = self.classifier(x)
+    x = x.view(x.size(0), 512, 1, 1)
+    x = self.features(x)
+    return x
+    
 class DVGG19_deconv(nn.Module):
   def __init__(self, input_dim, model=None, fixed=None, gray=False, d=128):
     super(DVGG19_deconv, self).__init__()
@@ -513,7 +545,7 @@ class AutoEncoder_GAN4(nn.Module):
     super(AutoEncoder_GAN4, self).__init__()
     self.be = BE(args.e1, fixed=True).eval()
     self.defined_trans = Transform8()
-    for di in range(1, args.num_dec+1):
+    for di in range(1, args.num_dec + 1):
       pretrained_model = None
       if args.pretrained_dir:
         assert(args.pretrained_timeid != None)
@@ -522,7 +554,8 @@ class AutoEncoder_GAN4(nn.Module):
         pretrained_model = pretrained_model[0]
       input_dim = args.num_z + args.num_class
       self.__setattr__("d" + str(di), Dec(input_dim, pretrained_model, fixed=False, gray=args.gray, num_divbranch=args.num_divbranch))
-    for sei in range(1, args.num_se+1):
+      self.mask = SaliencyMask(input_dim)
+    for sei in range(1, args.num_se + 1):
       self.__setattr__("se" + str(sei), SE(None, fixed=False))
       
 AutoEncoders = {
