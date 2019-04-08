@@ -78,6 +78,7 @@ parser.add_argument('--temp',  type=float, default=1, help="the tempature in KD"
 parser.add_argument('--adv_train', type=int, default=0)
 parser.add_argument('--ema_factor', type=float, default=0.9, help="exponential moving average") 
 parser.add_argument('--show_interval', type=int, default=10, help="the interval to print logs")
+parser.add_argument('--show_interval_gradient', type=int, default=50, help="the interval to print gradient")
 parser.add_argument('--save_interval', type=int, default=100, help="the interval to save sample images")
 parser.add_argument('--test_interval', type=int, default=1000, help="the interval to test and save models")
 parser.add_argument('--classloss_update_interval', type=int, default=1)
@@ -238,7 +239,7 @@ if __name__ == "__main__":
           lz_pixel += torch.mean(torch.abs(imgrecs_1 - imgrecs_2)) / torch.mean(torch.abs(random_z1 - random_z2))
         elif args.msgan_option == "pixelgray":
           imgrecs_1, imgrecs_2 = torch.split(imgrecs, args.batch_size, dim=0)
-          imgrecs_1 = imgrecs_1[:,0,:,:] * 0.299 + imgrecs_1[:,1,:,:] * 0.587 + imgrecs_1[:,2,:,:] * 0.114
+          imgrecs_1 = imgrecs_1[:,0,:,:] * 0.299 + imgrecs_1[:,1,:,:] * 0.587 + imgrecs_1[:,2,:,:] * 0.114 # the Y channel (Luminance) of a image
           imgrecs_2 = imgrecs_2[:,0,:,:] * 0.299 + imgrecs_2[:,1,:,:] * 0.587 + imgrecs_2[:,2,:,:] * 0.114
           lz_pixel += torch.mean(torch.abs(imgrecs_1 - imgrecs_2)) / torch.mean(torch.abs(random_z1 - random_z2))
         # elif args.msgan_option == "feature":
@@ -288,6 +289,7 @@ if __name__ == "__main__":
           hardloss_dec_all.append(hardloss.item()); trainacc_dec_all.append(trainacc)
           index = len(imgrec_all) - 1
           history_acc_dec_all[index] = history_acc_dec_all[index] * args.history_acc_weight + trainacc * (1 - args.history_acc_weight)
+         
           
           ## Adversarial loss
           advloss = 0
@@ -319,7 +321,19 @@ if __name__ == "__main__":
                  
         dec.zero_grad()
         total_loss.backward()
-              
+      
+      ## Gradient checking
+      if step % args.show_interval_gradient == 0:
+        ave_grad = []
+        for p in ae.d1.named_parameters():
+          layer_name = p[0]
+          if "bias" in layer_name: continue
+          if p[1].grad is not None:
+            ave_grad.append([layer_name, np.average(p[1].grad.abs()) * args.lr, np.average(p[1].data.abs())])
+        ave_grad = ["{:<20} {:.6f}  /  {:.6f}  ({:.10f})\n".format(x[0], x[1], x[2], x[1]/x[2]) for x in ave_grad]
+        ave_grad = "".join(ave_grad)
+        logprint(("E{:<%s}S{:<%s} (grad x lr) / weight:\n{}" % (num_digit_show_epoch, num_digit_show_step)).format(epoch, step, ave_grad))
+      
       # Update params
       for di in range(1, args.num_dec + 1):
         dec = eval("ae.d" + str(di)); optimizer = optimizer_dec[di-1]; ema = ema_dec[di-1]
