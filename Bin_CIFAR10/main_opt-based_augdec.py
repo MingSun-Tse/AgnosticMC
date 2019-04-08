@@ -60,6 +60,7 @@ parser.add_argument('--lw_soft', type=float, default=10) # According to the pape
 parser.add_argument('--lw_hard', type=float, default=1)
 parser.add_argument('--lw_tv',   type=float, default=1e-6)
 parser.add_argument('--lw_norm', type=float, default=1e-4)
+parser.add_argument('--lw_masknorm', type=float, default=1e-5)
 parser.add_argument('--lw_DA',   type=float, default=10)
 parser.add_argument('--lw_adv',  type=float, default=0.5)
 parser.add_argument('--lw_actimax',  type=float, default=10)
@@ -94,6 +95,7 @@ args = parser.parse_args()
 
 # Update and check args
 assert(args.num_se == 1)
+assert(args.num_dec == 1)
 assert(args.mode in AutoEncoders.keys())
 args.e1 = path_check(args.e1)
 args.e2 = path_check(args.e2)
@@ -242,7 +244,7 @@ if __name__ == "__main__":
           imgrecs[:,i,:,:] = mask.squeeze(1).mul(imgrecs_[:,i,:,:])
           
         # saliency mask
-        loss_mask_norm = torch.norm(mask, p=1) * 1e-5 # for sparsity
+        loss_mask_norm = torch.norm(mask, p=1) * args.lw_masknorm # for sparsity
         mask_1, mask_2 = torch.split(mask, args.batch_size, dim=0)
         loss_mask_diversity = -torch.mean(torch.abs(mask_1 - mask_2)) / torch.mean(torch.abs(random_z1 - random_z2)) * 100
         total_loss += loss_mask_diversity + loss_mask_norm
