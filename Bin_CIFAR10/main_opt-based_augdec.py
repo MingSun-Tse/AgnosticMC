@@ -316,6 +316,7 @@ if __name__ == "__main__":
             se = eval("ae.se" + str(sei))
             logits_dse = se(imgrec1)
             advloss += args.lw_adv / nn.CrossEntropyLoss()(logits_dse, label)
+          # total_loss_dec += advloss
           
           ## Activation maximization loss
           # ref: 2016 IJCV Visualizing Deep Convolutional Neural Networks Using Natural Pre-images
