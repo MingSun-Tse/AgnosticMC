@@ -348,7 +348,7 @@ if __name__ == "__main__":
               ave_grad.append([layer_name, np.average(p[1].grad.abs()) * args.lr, np.average(p[1].data.abs())])
           ave_grad = ["{:<20} {:.6f}  /  {:.6f}  ({:.10f})\n".format(x[0], x[1], x[2], x[1]/x[2]) for x in ave_grad]
           ave_grad = "".join(ave_grad)
-          logprint(("E{:0<%s}S{:0<%s} (grad x lr) / weight:\n{}" % (num_digit_show_epoch, num_digit_show_step)).format(epoch, step, ave_grad))
+          logprint(("E{:0>%s}S{:0>%s} (grad x lr) / weight:\n{}" % (num_digit_show_epoch, num_digit_show_step)).format(epoch, step, ave_grad))
 
      # Update SE
       hardloss_se_all = []; trainacc_se_all = []
@@ -377,7 +377,7 @@ if __name__ == "__main__":
       if step % args.save_interval == 0:
         ae.eval()
         # save some test images
-        logprint(("E{:0<%s}S{:0<%s} | Saving image samples" % (num_digit_show_epoch, num_digit_show_step)).format(epoch, step))
+        logprint(("E{:0>%s}S{:0>%s} | Saving image samples" % (num_digit_show_epoch, num_digit_show_step)).format(epoch, step))
         onehot_label = torch.eye(args.num_class)
         test_codes = torch.cat([torch.randn([args.num_class, args.num_z]), onehot_label], dim=1)
         test_labels = onehot_label.numpy().argmax(axis=1)        
@@ -409,7 +409,7 @@ if __name__ == "__main__":
           pred = ae.se1(img.cuda()).detach().max(1)[1]
           test_acc += pred.eq(label.view_as(pred)).sum().item()
         test_acc /= float(len(data_test))
-        format_str = "E{:0<%s}S{:0<%s} | " % (num_digit_show_epoch, num_digit_show_step) + "=" * (int(TimeID[-1]) + 1) + "> Test accuracy on SE: {:.4f} (ExpID: {})"
+        format_str = "E{:0>%s}S{:0>%s} | " % (num_digit_show_epoch, num_digit_show_step) + "=" * (int(TimeID[-1]) + 1) + "> Test accuracy on SE: {:.4f} (ExpID: {})"
         logprint(format_str.format(epoch, step, test_acc, ExpID))
         # torch.save(ae.se1.state_dict(), pjoin(weights_path, "%s_se_E%sS%s_testacc=%.4f.pth" % (ExpID, epoch, step, test_acc)))
         # torch.save(ae.d1.state_dict(), pjoin(weights_path, "%s_d1_E%sS%s.pth" % (ExpID, epoch, step)))
@@ -419,7 +419,7 @@ if __name__ == "__main__":
 
       # Print training loss
       if step % args.show_interval == 0:
-        format_str1 = "E{:0<%s}S{:0<%s}" % (num_digit_show_epoch, num_digit_show_step)
+        format_str1 = "E{:0>%s}S{:0>%s}" % (num_digit_show_epoch, num_digit_show_step)
         format_str2 = " | dec:" + " {:.3f}({:.3f}-{:.3f})" * args.num_dec * args.num_divbranch
         format_str3 = " | se:" + " {:.3f}({:.3f}-{:.3f})" * args.num_dec * args.num_divbranch 
         format_str4 = " | tv: {:.3f} norm: {:.3f} diversity: {:.3f} {:.3f} actimax: {:.3f} mask_diversity: {:.3f} mask_norm: {:.3f}"
