@@ -64,7 +64,8 @@ parser.add_argument('--lw_masknorm', type=float, default=1e-5)
 parser.add_argument('--lw_DA',   type=float, default=10)
 parser.add_argument('--lw_adv',  type=float, default=0.5)
 parser.add_argument('--lw_actimax',  type=float, default=10)
-parser.add_argument('--lw_msgan',  type=float, default=1)
+parser.add_argument('--lw_msgan',  type=float, default=100)
+parser.add_argument('--lw_maskdiversity',  type=float, default=100)
 # ----------------------------------------------------------------
 parser.add_argument('-b', '--batch_size', type=int, default=256)
 parser.add_argument('-p', '--project_name', type=str, default="test")
@@ -248,7 +249,7 @@ if __name__ == "__main__":
         total_loss_mask = 0
         loss_mask_norm = torch.norm(mask, p=1) * args.lw_masknorm # for sparsity
         mask_1, mask_2 = torch.split(mask, args.batch_size, dim=0)
-        loss_mask_diversity = -torch.mean(torch.abs(mask_1 - mask_2)) / torch.mean(torch.abs(random_z1 - random_z2)) * 100
+        loss_mask_diversity = -torch.mean(torch.abs(mask_1 - mask_2)) / torch.mean(torch.abs(random_z1 - random_z2)) * args.lw_maskdiversity
         total_loss_mask += loss_mask_diversity + loss_mask_norm
         imgrecs_masked_split = torch.split(imgrecs_masked, 3, dim=1)
         for imgrec_masked in imgrecs_masked_split:
