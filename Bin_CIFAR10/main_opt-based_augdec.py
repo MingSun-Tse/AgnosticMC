@@ -326,7 +326,8 @@ if __name__ == "__main__":
           actimax_loss = -args.lw_actimax * (torch.dot(logits1.flatten(), rand_loss_weight.flatten()) / logits1.size(0))
           actimax_loss_print.append(actimax_loss.item())
           if args.lw_actimax:
-            loss_actimax_diversity_attraction = (actimax_loss - loss_diversity.data - 30) * (actimax_loss - loss_diversity.data - 30) if actimax_loss > loss_diversity + 30 else 0
+            loss_actimax_diversity_attraction = \
+              (actimax_loss - loss_diversity.data - 30) * (actimax_loss - loss_diversity.data - 30) if actimax_loss > loss_diversity + 30 else 0
           else:
             loss_actimax_diversity_attraction = 0
           total_loss_dec += actimax_loss + loss_actimax_diversity_attraction
@@ -391,10 +392,10 @@ if __name__ == "__main__":
             
             imgs = torch.split(imgrecs, 3, dim=1)
             imgs_masked = torch.split(imgrecs_masked, 3, dim=1)
-            for j in range(len(imgs)):
-              img1, img2 = imgs[j], imgs_masked[j]
-              out_img1_path = pjoin(rec_img_path, "%s_E%sS%s_imgrec%s_label=%s_d%s_%s.jpg"        % (ExpID, epoch, step, i, test_labels[i], di, j))
-              out_img2_path = pjoin(rec_img_path, "%s_E%sS%s_imgrec%s_label=%s_d%s_%s_masked.jpg" % (ExpID, epoch, step, i, test_labels[i], di, j))
+            for bi in range(len(imgs)):
+              img1, img2 = imgs[bi], imgs_masked[bi]
+              out_img1_path = pjoin(rec_img_path, "%s_E%sS%s_d%s_b%s_label%s.jpg"        % (ExpID, epoch, step, di, bi, test_labels[i]))
+              out_img2_path = pjoin(rec_img_path, "%s_E%sS%s_d%s_b%s_masked_label%s.jpg" % (ExpID, epoch, step, di, bi, test_labels[i]))
               vutils.save_image(img1.data.cpu().float(), out_img1_path)
               vutils.save_image(img2.data.cpu().float(), out_img2_path)
             
