@@ -311,12 +311,11 @@ if __name__ == "__main__":
           history_acc_dec_all[index] = history_acc_dec_all[index] * args.history_acc_weight + trainacc * (1 - args.history_acc_weight)
           
           ## Adversarial loss, combat with SE
-          advloss = 0
-          for sei in range(1, args.num_se+1):
-            se = eval("ae.se" + str(sei))
-            logits_dse = se(imgrec1)
-            advloss += args.lw_adv / nn.CrossEntropyLoss()(logits_dse, label)
-          # total_loss_dec += advloss
+          if args.lw_adv:
+            for sei in range(1, args.num_se+1):
+              se = eval("ae.se" + str(sei))
+              logits_dse = se(imgrec1)
+              total_loss_dec += args.lw_adv / nn.CrossEntropyLoss()(logits_dse, label)
           
           ## Activation maximization loss
           # ref: 2016 IJCV Visualizing Deep Convolutional Neural Networks Using Natural Pre-images
