@@ -297,44 +297,43 @@ if __name__ == "__main__":
           # loss_diversity_feat = -args.lw_msgan * lz_feat
           # total_loss_dec += loss_diversity_feat
 
-          lz_pixel = 0
           if args.msgan_option == "pixel":
             imgrecs_1, imgrecs_2 = torch.split(imgrecs, args.batch_size, dim=0)
-            lz_pixel += torch.mean(torch.abs(imgrecs_1 - imgrecs_2)) / torch.mean(torch.abs(random_z1 - random_z2))
+            lz_pixel = torch.mean(torch.abs(imgrecs_1 - imgrecs_2)) / torch.mean(torch.abs(random_z1 - random_z2))
           elif args.msgan_option == "pixelgray": # deprecated
             imgrecs_1, imgrecs_2 = torch.split(imgrecs, args.batch_size, dim=0)
             imgrecs_1 = imgrecs_1[:,0,:,:] * 0.299 + imgrecs_1[:,1,:,:] * 0.587 + imgrecs_1[:,2,:,:] * 0.114 # the Y channel (Luminance) of a image
             imgrecs_2 = imgrecs_2[:,0,:,:] * 0.299 + imgrecs_2[:,1,:,:] * 0.587 + imgrecs_2[:,2,:,:] * 0.114
-            lz_pixel += torch.mean(torch.abs(imgrecs_1 - imgrecs_2)) / torch.mean(torch.abs(random_z1 - random_z2))
+            lz_pixel = torch.mean(torch.abs(imgrecs_1 - imgrecs_2)) / torch.mean(torch.abs(random_z1 - random_z2))
           loss_diversity_pixel = -args.lw_msgan * lz_pixel
           total_loss_dec += loss_diversity_pixel
         
         ##
         imgrecs_split = torch.split(imgrecs, 3, dim=1) # 3 channels
         actimax_loss_print = []
-        for imgrec1 in imgrecs_split:
+        for imgrec in imgrecs_split:
           # forward
-          feats1 = ae.be.forward_branch(tensor_normalize(imgrec1)); logits1 = feats1[-1]
-          imgrec1_DT = ae.defined_trans(imgrec1); logits1_DT = ae.be(tensor_normalize(imgrec1_DT)) # DT: defined transform
-          imgrec_all.append(imgrec1); imgrec_DT_all.append(imgrec1_DT) # for SE
+          feats = ae.be.forward_branch(tensor_normalize(imgrec)); logits = feats[-1]
+          imgrec_DT = ae.defined_trans(imgrec); logits_DT = ae.be(tensor_normalize(imgrec_DT)) # DT: defined transform
+          imgrec_all.append(imgrec); imgrec_DT_all.append(imgrec_DT) # for SE
           
           ## Low-level natural image prior: tv + image norm
           # ref: 2015 CVPR Understanding Deep Image Representations by Inverting Them
-          tvloss = args.lw_tv * (torch.sum(torch.abs(imgrec1[:, :, :, :-1] - imgrec1[:, :, :, 1:])) + 
-                                 torch.sum(torch.abs(imgrec1[:, :, :-1, :] - imgrec1[:, :, 1:, :])))
-          imgnorm = torch.pow(torch.norm(imgrec1, p=6), 6) * args.lw_norm
+          tvloss = args.lw_tv * (torch.sum(torch.abs(imgrec[:, :, :, :-1] - imgrec[:, :, :, 1:])) + 
+                                 torch.sum(torch.abs(imgrec[:, :, :-1, :] - imgrec[:, :, 1:, :])))
+          imgnorm = torch.pow(torch.norm(imgrec, p=6), 6) * args.lw_norm
           total_loss_dec += tvloss + imgnorm 
           
           ## Classification loss, the bottomline loss
-          # logprob1 = F.log_softmax(logits1/args.temp, dim=1)
+          # logprob1 = F.log_softmax(logits/args.temp, dim=1)
           # logprob2 = F.log_softmax(logits2/args.temp, dim=1)
           # softloss1 = nn.KLDivLoss()(logprob1, prob_gt.data) * (args.temp*args.temp) * args.lw_soft
           # softloss2 = nn.KLDivLoss()(logprob2, prob_gt.data) * (args.temp*args.temp) * args.lw_soft
-          hardloss = nn.CrossEntropyLoss()(logits1, label) * args.lw_hard
-          hardloss_DT = nn.CrossEntropyLoss()(logits1_DT, label) * args.lw_DA
+          hardloss = nn.CrossEntropyLoss()(logits, label) * args.lw_hard
+          hardloss_DT = nn.CrossEntropyLoss()(logits_DT, label) * args.lw_DA
           total_loss_dec += hardloss + hardloss_DT
           # for accuracy print
-          pred = logits1.detach().max(1)[1]; trainacc = pred.eq(label.view_as(pred)).sum().item() / label.size(0)
+          pred = logits.detach().max(1)[1]; trainacc = pred.eq(label.view_as(pred)).sum().item() / label.size(0)
           hardloss_dec_all.append(hardloss.item()); trainacc_dec_all.append(trainacc)
           index = len(imgrec_all) - 1
           history_acc_dec_all[index] = history_acc_dec_all[index] * args.history_acc_weight + trainacc * (1 - args.history_acc_weight)
@@ -343,17 +342,18 @@ if __name__ == "__main__":
           if args.lw_adv:
             for sei in range(1, args.num_se+1):
               se = eval("ae.se" + str(sei))
-              logits_dse = se(imgrec1)
+              logits_dse = se(imgrec)
               total_loss_dec += args.lw_adv / nn.CrossEntropyLoss()(logits_dse, label)
           
           ## Activation maximization loss
           # ref: 2016 IJCV Visualizing Deep Convolutional Neural Networks Using Natural Pre-images
-          args.lw_actimax = not (args.clip_actimax and epoch >= 7)
+          if args.clip_actimax and epoch >= 7:
+            args.lw_actimax = 0
           if args.lw_actimax:
-            rand_loss_weight = torch.rand_like(logits1) * args.noise_magnitude
-            for i in range(logits1.size(0)):
+            rand_loss_weight = torch.rand_like(logits) * args.noise_magnitude
+            for i in range(logits.size(0)):
               rand_loss_weight[i, label[i]] = 1
-            actimax_loss = -args.lw_actimax * (torch.dot(logits1.flatten(), rand_loss_weight.flatten()) / logits1.size(0))
+            actimax_loss = -args.lw_actimax * (torch.dot(logits.flatten(), rand_loss_weight.flatten()) / logits.size(0))
             actimax_loss_print.append(actimax_loss.item())
             total_loss_dec += actimax_loss
         
