@@ -133,18 +133,23 @@ if __name__ == "__main__":
   # Set up exponential moving average
   history_acc_se_all = []
   history_acc_dec_all = []
-  ema_dec = []; ema_se = []; ema_mask = []
+  ema_dec = []; ema_se = []; ema_mask = []; ema_meta = []
   for di in range(1, args.num_dec+1):
     ema_dec.append(EMA(args.ema_factor))
     ema_mask.append(EMA(args.ema_factor))
+    ema_meta.append(EMA(args.ema_factor))
     dec = eval("ae.d%s"  % di)
     masknet = ae.mask
+    metanet = ae.meta
     for name, param in dec.named_parameters():
       if param.requires_grad:
         ema_dec[-1].register(name, param.data)
     for name, param in masknet.named_parameters():
       if param.requires_grad:
         ema_mask[-1].register(name, param.data)
+    for name, param in metanet.named_parameters():
+      if param.requires_grad:
+        ema_meta[-1].register(name, param.data)
     for _ in range(args.num_divbranch):
       history_acc_se_all.append(0)
       history_acc_dec_all.append(0)
@@ -190,14 +195,16 @@ if __name__ == "__main__":
   logprint(args._get_kwargs())
   
   # Optimizer
-  optimizer_se   = [] 
+  optimizer_se   = []
   optimizer_dec  = []
   optimizer_mask = []
+  optimizer_meta = []
   for di in range(1, args.num_dec + 1):
     dec = eval("ae.d" + str(di))
     masknet = ae.mask
     optimizer_dec.append(torch.optim.Adam(dec.parameters(), lr=args.lr, betas=(args.b1, args.b2)))
     optimizer_mask.append(torch.optim.Adam(masknet.parameters(), lr=args.lr, betas=(args.b1, args.b2)))
+    optimizer_meta.append(torch.optim.Adam(metanet.parameters(), lr=args.lr, betas=(args.b1, args.b2)))
   for sei in range(1, args.num_se + 1):
     se = eval("ae.se" + str(sei))
     optimizer_se.append(torch.optim.Adam(se.parameters(), lr=args.lr, betas=(args.b1, args.b2)))
@@ -236,52 +243,73 @@ if __name__ == "__main__":
         # Set up model and ema
         dec = eval("ae.d" + str(di)); optimizer_d = optimizer_dec[di-1]; ema_d = ema_dec[di-1]
         masknet = ae.mask; optimizer_m = optimizer_mask[di-1]; ema_m = ema_mask[di-1]
+        metanet = ae.meta; optimizer_me = optimizer_meta[di-1]; ema_me = ema_meta[di-1]
         
         # Forward
-        decfeats_imgrecs = dec.forward_branch(x)
-        decfeats, imgrecs = decfeats_imgrecs[:-1], decfeats_imgrecs[-1]
-        mask = masknet(x)
-        imgrecs_masked = torch.zeros_like(imgrecs).cuda()
-        for i in range(imgrecs.size(1)):
-          imgrecs_masked[:,i,:,:] = mask.squeeze(1).mul(imgrecs[:,i,:,:])
-          
+        # decfeats_imgrecs = dec.forward_branch(x)
+        # decfeats, imgrecs = decfeats_imgrecs[:-1], decfeats_imgrecs[-1]
+        # mask = masknet(x)
+        # imgrecs_masked = torch.zeros_like(imgrecs).cuda()
+        # for i in range(imgrecs.size(1)):
+          # imgrecs_masked[:,i,:,:] = mask.squeeze(1).mul(imgrecs[:,i,:,:])
+        decfeat = dec(x); meta_layer = metanet(x)
+        imgrecs = []
+        for i in range(decfeat.size(0)):
+          w1 = meta_layer[0][i]; w1 = w1.view(32, 64, 3, 3)
+          w2 = meta_layer[1][i]; w2 = w2.view(32, 32, 3, 3)
+          w3 = meta_layer[2][i]; w3 = w3.view(16, 32, 3, 3)
+          w4 = meta_layer[3][i]; w4 = w4.view( 3, 16, 3, 3)
+          feat = decfeat[i].unsqueeze(0)
+          feat = F.relu(ae.bn1(F.conv2d(feat, w1, padding=1)), inplace=True)
+          feat = F.relu(ae.bn2(F.conv2d(feat, w2, padding=1)), inplace=True); feat = ae.upscale(feat)
+          feat = F.relu(ae.bn3(F.conv2d(feat, w3, padding=1)), inplace=True)
+          img  = F.sigmoid(ae.bn4(F.conv2d(feat, w4, padding=1)))
+          imgrecs.append(img.squeeze(0))
+        imgrecs = torch.stack(imgrecs, dim=0)
+        
         # Update masknet
-        total_loss_mask = 0
-        loss_mask_norm = torch.norm(mask, p=1) * args.lw_masknorm # for sparsity
-        mask_1, mask_2 = torch.split(mask, args.batch_size, dim=0)
-        loss_mask_diversity = -torch.mean(torch.abs(mask_1 - mask_2)) / torch.mean(torch.abs(random_z1 - random_z2)) * args.lw_maskdiversity
-        total_loss_mask += loss_mask_diversity + loss_mask_norm
-        imgrecs_masked_split = torch.split(imgrecs_masked, 3, dim=1)
-        for imgrec_masked in imgrecs_masked_split:
-          logits = ae.be(tensor_normalize(imgrec_masked))
-          total_loss_mask += nn.CrossEntropyLoss()(logits, label) * args.lw_hard
-        masknet.zero_grad()
-        total_loss_mask.backward(retain_graph=True)
-        optimizer_m.step()
-        for name, param in masknet.named_parameters():
-          if param.requires_grad:
-            param.data = ema_m(name, param.data)
+        if args.lw_maskdiversity:
+          total_loss_mask = 0
+          loss_mask_norm = torch.norm(mask, p=1) * args.lw_masknorm # for sparsity
+          mask_1, mask_2 = torch.split(mask, args.batch_size, dim=0)
+          loss_mask_diversity = -torch.mean(torch.abs(mask_1 - mask_2)) / torch.mean(torch.abs(random_z1 - random_z2)) * args.lw_maskdiversity
+          total_loss_mask += loss_mask_diversity + loss_mask_norm
+          imgrecs_masked_split = torch.split(imgrecs_masked, 3, dim=1)
+          for imgrec_masked in imgrecs_masked_split:
+            logits = ae.be(tensor_normalize(imgrec_masked))
+            total_loss_mask += nn.CrossEntropyLoss()(logits, label) * args.lw_hard
+          masknet.zero_grad()
+          total_loss_mask.backward(retain_graph=True)
+          optimizer_m.step()
+          for name, param in masknet.named_parameters():
+            if param.requires_grad:
+              param.data = ema_m(name, param.data)
         
         ## Diversity encouraging loss: MSGAN
         # ref: 2019 CVPR Mode Seeking Generative Adversarial Networks for Diverse Image Synthesis
         total_loss_dec = 0
-        lz_feat = 0; lz_pixel = 0
-        for decfeat in decfeats:
-          decfeat_1, decfeat_2 = torch.split(decfeat, args.batch_size, dim=0)
-          lz_feat += torch.mean(torch.abs(decfeat_1 - decfeat_2)) / torch.mean(torch.abs(random_z1 - random_z2)) * 0.1
-        lz_feat /= len(decfeats)
-        if args.msgan_option == "pixel":
-          imgrecs_1, imgrecs_2 = torch.split(imgrecs_masked, args.batch_size, dim=0)
-          lz_pixel += torch.mean(torch.abs(imgrecs_1 - imgrecs_2)) / torch.mean(torch.abs(random_z1 - random_z2))
-        elif args.msgan_option == "pixelgray": # deprecated
-          imgrecs_1, imgrecs_2 = torch.split(imgrecs_masked, args.batch_size, dim=0)
-          imgrecs_1 = imgrecs_1[:,0,:,:] * 0.299 + imgrecs_1[:,1,:,:] * 0.587 + imgrecs_1[:,2,:,:] * 0.114 # the Y channel (Luminance) of a image
-          imgrecs_2 = imgrecs_2[:,0,:,:] * 0.299 + imgrecs_2[:,1,:,:] * 0.587 + imgrecs_2[:,2,:,:] * 0.114
-          lz_pixel += torch.mean(torch.abs(imgrecs_1 - imgrecs_2)) / torch.mean(torch.abs(random_z1 - random_z2))
-        loss_diversity_feat, loss_diversity_pixel = -args.lw_msgan * lz_feat, -args.lw_msgan * lz_pixel
-        loss_diversity = loss_diversity_feat + loss_diversity_pixel
-        total_loss_dec += loss_diversity
+        if args.lw_msgan:
+          # lz_feat = 0
+          # for decfeat in decfeats:
+            # decfeat_1, decfeat_2 = torch.split(decfeat, args.batch_size, dim=0)
+            # lz_feat += torch.mean(torch.abs(decfeat_1 - decfeat_2)) / torch.mean(torch.abs(random_z1 - random_z2)) * 0.1
+          # lz_feat /= len(decfeats)
+          # loss_diversity_feat = -args.lw_msgan * lz_feat
+          # total_loss_dec += loss_diversity_feat
+
+          lz_pixel = 0
+          if args.msgan_option == "pixel":
+            imgrecs_1, imgrecs_2 = torch.split(imgrecs, args.batch_size, dim=0)
+            lz_pixel += torch.mean(torch.abs(imgrecs_1 - imgrecs_2)) / torch.mean(torch.abs(random_z1 - random_z2))
+          elif args.msgan_option == "pixelgray": # deprecated
+            imgrecs_1, imgrecs_2 = torch.split(imgrecs, args.batch_size, dim=0)
+            imgrecs_1 = imgrecs_1[:,0,:,:] * 0.299 + imgrecs_1[:,1,:,:] * 0.587 + imgrecs_1[:,2,:,:] * 0.114 # the Y channel (Luminance) of a image
+            imgrecs_2 = imgrecs_2[:,0,:,:] * 0.299 + imgrecs_2[:,1,:,:] * 0.587 + imgrecs_2[:,2,:,:] * 0.114
+            lz_pixel += torch.mean(torch.abs(imgrecs_1 - imgrecs_2)) / torch.mean(torch.abs(random_z1 - random_z2))
+          loss_diversity_pixel = -args.lw_msgan * lz_pixel
+          total_loss_dec += loss_diversity_pixel
         
+        ##
         imgrecs_split = torch.split(imgrecs, 3, dim=1) # 3 channels
         actimax_loss_print = []
         for imgrec1 in imgrecs_split:
@@ -320,18 +348,14 @@ if __name__ == "__main__":
           
           ## Activation maximization loss
           # ref: 2016 IJCV Visualizing Deep Convolutional Neural Networks Using Natural Pre-images
-          if args.clip_actimax and epoch >= 7: args.lw_actimax = 0
-          rand_loss_weight = torch.rand_like(logits1) * args.noise_magnitude
-          for i in range(logits1.size(0)):
-            rand_loss_weight[i, label[i]] = 1
-          actimax_loss = -args.lw_actimax * (torch.dot(logits1.flatten(), rand_loss_weight.flatten()) / logits1.size(0))
-          actimax_loss_print.append(actimax_loss.item())
+          args.lw_actimax = not (args.clip_actimax and epoch >= 7)
           if args.lw_actimax:
-            loss_actimax_diversity_attraction = \
-              (actimax_loss - loss_diversity.data - 30) * (actimax_loss - loss_diversity.data - 30) if actimax_loss > loss_diversity + 30 else 0
-          else:
-            loss_actimax_diversity_attraction = 0
-          total_loss_dec += actimax_loss + loss_actimax_diversity_attraction
+            rand_loss_weight = torch.rand_like(logits1) * args.noise_magnitude
+            for i in range(logits1.size(0)):
+              rand_loss_weight[i, label[i]] = 1
+            actimax_loss = -args.lw_actimax * (torch.dot(logits1.flatten(), rand_loss_weight.flatten()) / logits1.size(0))
+            actimax_loss_print.append(actimax_loss.item())
+            total_loss_dec += actimax_loss
         
         dec.zero_grad()
         total_loss_dec.backward()
@@ -385,16 +409,27 @@ if __name__ == "__main__":
         for i in range(len(test_codes)):
           x = test_codes[i].cuda().unsqueeze(0)
           for di in range(1, args.num_dec + 1):
-            dec = eval("ae.d%s" % di); masknet = ae.mask
-            imgrecs = dec(x); mask = masknet(x)
-            imgrecs_masked = torch.zeros_like(imgrecs).cuda()
-            for k in range(imgrecs.size(1)):
-              imgrecs_masked[:,k,:,:] = mask.squeeze(1).mul(imgrecs[:,k,:,:])
+            dec = eval("ae.d%s" % di); masknet = ae.mask; metanet = ae.meta
+            # imgrecs = dec(x); mask = masknet(x)
+            # imgrecs_masked = torch.zeros_like(imgrecs).cuda()
+            # for k in range(imgrecs.size(1)):
+              # imgrecs_masked[:,k,:,:] = mask.squeeze(1).mul(imgrecs[:,k,:,:])
+            
+            meta_layer = metanet(x)
+            w1 = meta_layer[0]; w1 = w1.view(32, 64, 3, 3)
+            w2 = meta_layer[1]; w2 = w2.view(32, 32, 3, 3)
+            w3 = meta_layer[2]; w3 = w3.view(16, 32, 3, 3)
+            w4 = meta_layer[3]; w4 = w4.view( 3, 16, 3, 3)
+            feat = dec(x)
+            feat = F.relu(ae.bn1(F.conv2d(feat, w1, padding=1)), inplace=True)
+            feat = F.relu(ae.bn2(F.conv2d(feat, w2, padding=1)), inplace=True); feat = ae.upscale(feat)
+            feat = F.relu(ae.bn3(F.conv2d(feat, w3, padding=1)), inplace=True)
+            imgrecs = F.sigmoid(ae.bn4(F.conv2d(feat, w4, padding=1)))
             
             imgs = torch.split(imgrecs, 3, dim=1)
-            imgs_masked = torch.split(imgrecs_masked, 3, dim=1)
+            # imgs_masked = torch.split(imgrecs_masked, 3, dim=1)
             for bi in range(len(imgs)):
-              img1, img2 = imgs[bi], imgs_masked[bi]
+              img1, img2 = imgs[bi], imgs[bi]
               out_img1_path = pjoin(rec_img_path, "%s_E%sS%s_d%s_b%s_label%s.jpg"        % (ExpID, epoch, step, di, bi, test_labels[i]))
               out_img2_path = pjoin(rec_img_path, "%s_E%sS%s_d%s_b%s_masked_label%s.jpg" % (ExpID, epoch, step, di, bi, test_labels[i]))
               vutils.save_image(img1.data.cpu().float(), out_img1_path)
@@ -434,8 +469,7 @@ if __name__ == "__main__":
             epoch, step,
             *strvalue2,
             *strvalue3,
-            tvloss.item(), imgnorm.item(), loss_diversity_feat.item(), loss_diversity_pixel.item(), np.average(actimax_loss_print),
-            loss_mask_diversity.item(), loss_mask_norm.item(),
-            (time.time()-t1)/args.show_interval))
+            tvloss.item(), imgnorm.item(), 0, loss_diversity_pixel.item(), np.average(actimax_loss_print), 0, 0,
+            (time.time()-t1)/args.show_interval)) # loss_mask_diversity
 
         t1 = time.time()
