@@ -65,7 +65,7 @@ parser.add_argument('-b', '--batch_size', type=int, default=600) # 256)
 parser.add_argument('-p', '--project_name', type=str, default="test")
 parser.add_argument('-r', '--resume', action='store_true')
 parser.add_argument('-m', '--mode', type=str, default="GAN4", help='the training mode name.')
-parser.add_argument('--num_epoch', type=int, default=50)
+parser.add_argument('--num_epoch', type=int, default=200)
 parser.add_argument('--num_class', type=int, default=10)
 parser.add_argument('--use_pseudo_code', action="store_false")
 parser.add_argument('--begin', type=float, default=25)
@@ -216,7 +216,7 @@ if __name__ == "__main__":
         for imgrec in imgrecs_split:
           # forward
           imgrec_all.append(imgrec) # for SE
-          feats = ae.be.forward_branch(ae.normalize(imgrec))
+          feats = ae.be.forward_branch(imgrec)
           logits = feats[-1]; last_feature = feats[-2]
           label = logits.argmax(dim=1)
           
@@ -229,12 +229,14 @@ if __name__ == "__main__":
           # total_loss_dec += imgnorm
           
           ## Classification loss, the bottomline loss
+          # print(logits.data.cpu().numpy(), label.data.cpu().numpy())
           hardloss = nn.CrossEntropyLoss()(logits, label) * args.lw_hard
+          
           total_loss_dec += hardloss
           if args.lw_DT:
             imgrec_DT = ae.defined_trans(imgrec) # DT: defined transform
             imgrec_DT_all.append(imgrec_DT) # for SE
-            logits_DT = ae.be(ae.normalize(imgrec_DT))
+            logits_DT = ae.be(imgrec_DT)
             total_loss_dec += nn.CrossEntropyLoss()(logits_DT, label) * args.lw_DT
           # for accuracy print
           pred = logits.detach().max(1)[1]; trainacc = pred.eq(label.view_as(pred)).sum().item() / label.size(0)
@@ -263,12 +265,12 @@ if __name__ == "__main__":
           
           ## Huawei's idea
           if args.lw_feat_L1_norm:
-            L_alpha = -torch.norm(last_feature, p=1) / last_feature.size(0)
-            total_loss_dec += L_alpha * args.lw_feat_L1_norm
+            L_alpha = -torch.norm(last_feature, p=1) / last_feature.size(0) * args.lw_feat_L1_norm
+            total_loss_dec += L_alpha 
           if args.lw_class_balance:
             pred_prob = logits.softmax(dim=1).mean(dim=0)
-            L_ie = -torch.dot(pred_prob, torch.log(pred_prob)) / args.num_class
-            total_loss_dec += L_ie * args.lw_class_balance
+            L_ie = torch.dot(pred_prob, torch.log(pred_prob)) / args.num_class * args.lw_class_balance
+            total_loss_dec += L_ie 
           
         dec.zero_grad()
         total_loss_dec.backward()
@@ -294,11 +296,11 @@ if __name__ == "__main__":
         se = eval("ae.se" + str(sei)); optimizer = optimizer_se[sei-1]; ema = ema_se[sei-1]
         loss_se = 0
         for i in range(len(imgrec_all)):
-          logits = se(ae.normalize(imgrec_all[i].detach()))
+          logits = se(imgrec_all[i].detach())
           hardloss = nn.CrossEntropyLoss()(logits, label) * args.lw_hard
           loss_se += hardloss
           if args.lw_DT:
-            logits_DT = se(ae.normalize(imgrec_DT_all[i].detach()))
+            logits_DT = se(imgrec_DT_all[i].detach())
             hardloss_DT = nn.CrossEntropyLoss()(logits_DT, label) * args.lw_DT
             loss_se += hardloss_DT
           pred = logits.detach().max(1)[1]; trainacc = pred.eq(label.view_as(pred)).sum().item() / label.size(0)
@@ -354,7 +356,7 @@ if __name__ == "__main__":
         format_str1 = "E{:0>%s}S{:0>%s}" % (num_digit_show_epoch, num_digit_show_step)
         format_str2 = " | dec:" + " {:.3f}({:.3f}-{:.3f})" * args.num_dec * args.num_divbranch
         format_str3 = " | se:" + " {:.3f}({:.3f}-{:.3f})" * args.num_dec * args.num_divbranch 
-        format_str4 = " | tv: {:.3f} norm: {:.3f} diversity: {:.3f} {:.3f} actimax: {:.3f}"
+        format_str4 = " | tv: {:.3f} norm: {:.3f} L_alpha: {:.3f} L_ie: {:.3f}"
         format_str5 = " ({:.3f}s/step)"
         format_str = "".join([format_str1, format_str2, format_str3, format_str4, format_str5])
         strvalue2 = []; strvalue3 = []
@@ -365,7 +367,7 @@ if __name__ == "__main__":
             epoch, step,
             *strvalue2,
             *strvalue3,
-            tvloss.item(), imgnorm.item(), 0, 0, 0,
+            tvloss.item(), imgnorm.item(), L_alpha.item(), L_ie.item(),
             (time.time() - t1) / args.show_interval))
 
         t1 = time.time()

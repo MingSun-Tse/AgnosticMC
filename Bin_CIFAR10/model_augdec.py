@@ -517,9 +517,9 @@ class DLeNet5(nn.Module):
         nn.BatchNorm2d(64, 0.8),
         nn.LeakyReLU(0.2, inplace=True),
         nn.Conv2d(64, 1, 3, stride=1, padding=1),
-        nn.Sigmoid(),
-        # nn.Tanh(),
-        # nn.BatchNorm2d(1, 0.8), # Ref: Huawei's paper. They add a BN layer at the end of the generator.
+        # nn.Sigmoid(),
+        nn.Tanh(),
+        nn.BatchNorm2d(1, 0.8), # Ref: Huawei's paper. They add a BN layer at the end of the generator.
     )
   def forward(self, z):
       out = self.l1(z)
