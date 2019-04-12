@@ -186,6 +186,8 @@ class VGG19(nn.Module):
       m = self.features.module[i-1]
       if isinstance(m, nn.MaxPool2d):
         self.branch_layer.append("f" + str(i))
+      if i == self.features_num_module - 2: # for Huawei's idea
+        self.branch_layer.append("f" + str(i))
     
     if model:
      checkpoint = torch.load(model)
@@ -609,7 +611,7 @@ class Transform8(nn.Module): # random transform combination
 # ---------------------------------------------------
 # AutoEncoder part
 BE  = VGG19      # Big Encoder
-Dec = DVGG19_meta # Decoder
+Dec = DVGG19_aug # Decoder
 SE  = SmallVGG19 # Small Encoder
 
 class AutoEncoder_GAN4(nn.Module):
@@ -629,7 +631,7 @@ class AutoEncoder_GAN4(nn.Module):
         pretrained_model = [x for x in os.listdir(args.pretrained_dir) if "_d%s_" % di in x and args.pretrained_timeid in x] # the number of pretrained decoder should be like "SERVER218-20190313-1233_d3_E0S0.pth"
         assert(len(pretrained_model) == 1)
         pretrained_model = pretrained_model[0]
-      input_dim = args.num_z + args.num_class
+      input_dim = args.num_z # + args.num_class # There is only random noise as input in Huawei's idea
       self.__setattr__("d" + str(di), Dec(input_dim, pretrained_model, fixed=False, gray=args.gray, num_divbranch=args.num_divbranch))
       self.mask = MaskNet(input_dim)
       self.meta = MetaNet(input_dim)

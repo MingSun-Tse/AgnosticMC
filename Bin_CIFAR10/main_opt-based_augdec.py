@@ -47,7 +47,7 @@ parser.add_argument('--pretrained_dir',   type=str, default=None, help="the dire
 parser.add_argument('--pretrained_timeid',type=str, default=None, help="the timeid of the pretrained models.")
 parser.add_argument('--num_dec', type=int, default=1)
 parser.add_argument('--num_se', type=int, default=1)
-parser.add_argument('--num_divbranch', type=int, default=5)
+parser.add_argument('--num_divbranch', type=int, default=1)
 parser.add_argument('--t',   type=str,   default=None)
 parser.add_argument('--gpu', type=int,   default=0)
 parser.add_argument('--lr',  type=float, default=1e-3)
@@ -61,11 +61,13 @@ parser.add_argument('--lw_hard', type=float, default=1)
 parser.add_argument('--lw_tv',   type=float, default=1e-6)
 parser.add_argument('--lw_norm', type=float, default=1e-4)
 parser.add_argument('--lw_masknorm', type=float, default=1e-5)
-parser.add_argument('--lw_DA',   type=float, default=10)
-parser.add_argument('--lw_adv',  type=float, default=0.5)
-parser.add_argument('--lw_actimax',  type=float, default=10)
+parser.add_argument('--lw_DT',   type=float, default=10)
+parser.add_argument('--lw_adv',  type=float, default=0)
+parser.add_argument('--lw_actimax',  type=float, default=0)
 parser.add_argument('--lw_msgan',  type=float, default=100)
 parser.add_argument('--lw_maskdiversity',  type=float, default=100)
+parser.add_argument('--lw_feat_L1_norm', type=float, default=0.1)
+parser.add_argument('--lw_class_balance', type=float, default=5)
 # ----------------------------------------------------------------
 parser.add_argument('-b', '--batch_size', type=int, default=256)
 parser.add_argument('-p', '--project_name', type=str, default="test")
@@ -172,19 +174,11 @@ if __name__ == "__main__":
                                 transforms.ToTensor(),
                                 normalize,
                               ]))
-  if args.gray:
-    data_test = datasets.CIFAR10('./CIFAR10_data', train=False, download=True,
-                              transform=transforms.Compose([
-                                transforms.Grayscale(num_output_channels=3), # test with gray image
-                                transforms.ToTensor(),
-                                normalize,
-                              ]))
-  else:
-    data_test = datasets.CIFAR10('./CIFAR10_data', train=False, download=True,
-                              transform=transforms.Compose([
-                                transforms.ToTensor(),
-                                normalize,
-                              ]))
+  data_test = datasets.CIFAR10('./CIFAR10_data', train=False, download=True,
+                            transform=transforms.Compose([
+                              transforms.ToTensor(),
+                              normalize,
+                            ]))
   kwargs = {'num_workers': 4, 'pin_memory': True}
   train_loader = torch.utils.data.DataLoader(data_train, batch_size=args.batch_size, shuffle=True, **kwargs)
   
@@ -230,108 +224,60 @@ if __name__ == "__main__":
       # Generate codes randomly
       random_z1 = torch.cuda.FloatTensor(args.batch_size, args.num_z); random_z1.copy_(torch.randn(args.batch_size, args.num_z))
       random_z2 = torch.cuda.FloatTensor(args.batch_size, args.num_z); random_z2.copy_(torch.randn(args.batch_size, args.num_z))
-      z_concat = torch.cat([random_z1, random_z2], dim=0)
-      onehot_label = one_hot.sample_n(args.batch_size).view([args.batch_size, args.num_class]).cuda()
-      label_concat = torch.cat([onehot_label, onehot_label], dim=0)
-      x = torch.cat([z_concat, label_concat], dim=1).detach() # input to the Generator network
-      label = label_concat.data.cpu().numpy().argmax(axis=1)
-      label = torch.from_numpy(label).long().detach().cuda()
-        
+      x = torch.cat([random_z1, random_z2], dim=0)
+              
       # Update decoder
       imgrec_all = []; imgrec_DT_all = []; hardloss_dec_all = []; trainacc_dec_all = []
       for di in range(1, args.num_dec + 1):
         # Set up model and ema
         dec = eval("ae.d" + str(di)); optimizer_d = optimizer_dec[di-1]; ema_d = ema_dec[di-1]
-        masknet = ae.mask; optimizer_m = optimizer_mask[di-1]; ema_m = ema_mask[di-1]
-        metanet = ae.meta; optimizer_me = optimizer_meta[di-1]; ema_me = ema_meta[di-1]
-        
+        total_loss_dec = 0
+
         # Forward
-        # decfeats_imgrecs = dec.forward_branch(x)
-        # decfeats, imgrecs = decfeats_imgrecs[:-1], decfeats_imgrecs[-1]
-        # mask = masknet(x)
-        # imgrecs_masked = torch.zeros_like(imgrecs).cuda()
-        # for i in range(imgrecs.size(1)):
-          # imgrecs_masked[:,i,:,:] = mask.squeeze(1).mul(imgrecs[:,i,:,:])
-        decfeat = dec(x); meta_layer = metanet(x)
-        imgrecs = []
-        for i in range(decfeat.size(0)):
-          w1 = meta_layer[0][i]; w1 = w1.view(32, 64, 3, 3)
-          w2 = meta_layer[1][i]; w2 = w2.view(32, 32, 3, 3)
-          w3 = meta_layer[2][i]; w3 = w3.view(16, 32, 3, 3)
-          w4 = meta_layer[3][i]; w4 = w4.view( 3, 16, 3, 3)
-          feat = decfeat[i].unsqueeze(0)
-          feat = F.relu(ae.bn1(F.conv2d(feat, w1, padding=1)), inplace=True)
-          feat = F.relu(ae.bn2(F.conv2d(feat, w2, padding=1)), inplace=True); feat = ae.upscale(feat)
-          feat = F.relu(ae.bn3(F.conv2d(feat, w3, padding=1)), inplace=True)
-          img  = F.sigmoid(ae.bn4(F.conv2d(feat, w4, padding=1)))
-          imgrecs.append(img.squeeze(0))
-        imgrecs = torch.stack(imgrecs, dim=0)
-        
-        # Update masknet
-        if args.lw_maskdiversity:
-          total_loss_mask = 0
-          loss_mask_norm = torch.norm(mask, p=1) * args.lw_masknorm # for sparsity
-          mask_1, mask_2 = torch.split(mask, args.batch_size, dim=0)
-          loss_mask_diversity = -torch.mean(torch.abs(mask_1 - mask_2)) / torch.mean(torch.abs(random_z1 - random_z2)) * args.lw_maskdiversity
-          total_loss_mask += loss_mask_diversity + loss_mask_norm
-          imgrecs_masked_split = torch.split(imgrecs_masked, 3, dim=1)
-          for imgrec_masked in imgrecs_masked_split:
-            logits = ae.be(tensor_normalize(imgrec_masked))
-            total_loss_mask += nn.CrossEntropyLoss()(logits, label) * args.lw_hard
-          masknet.zero_grad()
-          total_loss_mask.backward(retain_graph=True)
-          optimizer_m.step()
-          for name, param in masknet.named_parameters():
-            if param.requires_grad:
-              param.data = ema_m(name, param.data)
+        imgrecs = dec(x)
         
         ## Diversity encouraging loss: MSGAN
         # ref: 2019 CVPR Mode Seeking Generative Adversarial Networks for Diverse Image Synthesis
-        total_loss_dec = 0
         if args.lw_msgan:
-          # lz_feat = 0
-          # for decfeat in decfeats:
-            # decfeat_1, decfeat_2 = torch.split(decfeat, args.batch_size, dim=0)
-            # lz_feat += torch.mean(torch.abs(decfeat_1 - decfeat_2)) / torch.mean(torch.abs(random_z1 - random_z2)) * 0.1
-          # lz_feat /= len(decfeats)
-          # loss_diversity_feat = -args.lw_msgan * lz_feat
-          # total_loss_dec += loss_diversity_feat
-
           if args.msgan_option == "pixel":
             imgrecs_1, imgrecs_2 = torch.split(imgrecs, args.batch_size, dim=0)
             lz_pixel = torch.mean(torch.abs(imgrecs_1 - imgrecs_2)) / torch.mean(torch.abs(random_z1 - random_z2))
           elif args.msgan_option == "pixelgray": # deprecated
             imgrecs_1, imgrecs_2 = torch.split(imgrecs, args.batch_size, dim=0)
-            imgrecs_1 = imgrecs_1[:,0,:,:] * 0.299 + imgrecs_1[:,1,:,:] * 0.587 + imgrecs_1[:,2,:,:] * 0.114 # the Y channel (Luminance) of a image
+            imgrecs_1 = imgrecs_1[:,0,:,:] * 0.299 + imgrecs_1[:,1,:,:] * 0.587 + imgrecs_1[:,2,:,:] * 0.114 # the Y channel (Luminance) of an image
             imgrecs_2 = imgrecs_2[:,0,:,:] * 0.299 + imgrecs_2[:,1,:,:] * 0.587 + imgrecs_2[:,2,:,:] * 0.114
             lz_pixel = torch.mean(torch.abs(imgrecs_1 - imgrecs_2)) / torch.mean(torch.abs(random_z1 - random_z2))
           loss_diversity_pixel = -args.lw_msgan * lz_pixel
-          total_loss_dec += loss_diversity_pixel
+          # total_loss_dec += loss_diversity_pixel
         
-        ##
+
         imgrecs_split = torch.split(imgrecs, 3, dim=1) # 3 channels
         actimax_loss_print = []
         for imgrec in imgrecs_split:
           # forward
-          feats = ae.be.forward_branch(tensor_normalize(imgrec)); logits = feats[-1]
-          imgrec_DT = ae.defined_trans(imgrec); logits_DT = ae.be(tensor_normalize(imgrec_DT)) # DT: defined transform
-          imgrec_all.append(imgrec); imgrec_DT_all.append(imgrec_DT) # for SE
+          imgrec_all.append(imgrec) # for SE
+          feats = ae.be.forward_branch(tensor_normalize(imgrec))
+          logits = feats[-1]; last_feature = feats[-2]
+          label = logits.argmax(dim=1)
           
           ## Low-level natural image prior: tv + image norm
           # ref: 2015 CVPR Understanding Deep Image Representations by Inverting Them
-          tvloss = args.lw_tv * (torch.sum(torch.abs(imgrec[:, :, :, :-1] - imgrec[:, :, :, 1:])) + 
-                                 torch.sum(torch.abs(imgrec[:, :, :-1, :] - imgrec[:, :, 1:, :])))
-          imgnorm = torch.pow(torch.norm(imgrec, p=6), 6) * args.lw_norm
-          total_loss_dec += tvloss + imgnorm 
+          if args.lw_tv:
+            tvloss = args.lw_tv * (torch.sum(torch.abs(imgrec[:, :, :, :-1] - imgrec[:, :, :, 1:])) + 
+                                   torch.sum(torch.abs(imgrec[:, :, :-1, :] - imgrec[:, :, 1:, :])))
+            total_loss_dec += tvloss
+          if args.lw_norm:            
+            imgnorm = torch.pow(torch.norm(imgrec, p=6), 6) * args.lw_norm
+            total_loss_dec += imgnorm
           
           ## Classification loss, the bottomline loss
-          # logprob1 = F.log_softmax(logits/args.temp, dim=1)
-          # logprob2 = F.log_softmax(logits2/args.temp, dim=1)
-          # softloss1 = nn.KLDivLoss()(logprob1, prob_gt.data) * (args.temp*args.temp) * args.lw_soft
-          # softloss2 = nn.KLDivLoss()(logprob2, prob_gt.data) * (args.temp*args.temp) * args.lw_soft
           hardloss = nn.CrossEntropyLoss()(logits, label) * args.lw_hard
-          hardloss_DT = nn.CrossEntropyLoss()(logits_DT, label) * args.lw_DA
-          total_loss_dec += hardloss + hardloss_DT
+          total_loss_dec += hardloss
+          if args.lw_DT:
+            imgrec_DT = ae.defined_trans(imgrec) # DT: defined transform
+            imgrec_DT_all.append(imgrec_DT) # for SE
+            logits_DT = ae.be(tensor_normalize(imgrec_DT))
+            total_loss_dec += nn.CrossEntropyLoss()(logits_DT, label) * args.lw_DT
           # for accuracy print
           pred = logits.detach().max(1)[1]; trainacc = pred.eq(label.view_as(pred)).sum().item() / label.size(0)
           hardloss_dec_all.append(hardloss.item()); trainacc_dec_all.append(trainacc)
@@ -340,7 +286,7 @@ if __name__ == "__main__":
           
           ## Adversarial loss, combat with SE
           if args.lw_adv:
-            for sei in range(1, args.num_se+1):
+            for sei in range(1, args.num_se + 1):
               se = eval("ae.se" + str(sei))
               logits_dse = se(imgrec)
               total_loss_dec += args.lw_adv / nn.CrossEntropyLoss()(logits_dse, label)
@@ -356,7 +302,16 @@ if __name__ == "__main__":
             actimax_loss = -args.lw_actimax * (torch.dot(logits.flatten(), rand_loss_weight.flatten()) / logits.size(0))
             actimax_loss_print.append(actimax_loss.item())
             total_loss_dec += actimax_loss
-        
+          
+          ## Huawei's idea
+          if args.lw_feat_L1_norm:
+            L_alpha = -torch.norm(last_feature, p=1) / last_feature.size(0)
+            total_loss_dec += L_alpha * args.lw_feat_L1_norm
+          if args.lw_class_balance:
+            pred_prob = logits.softmax(dim=1).mean(dim=0)
+            L_ie = -torch.dot(pred_prob, torch.log(pred_prob)) / args.num_class
+            total_loss_dec += L_ie * args.lw_class_balance
+          
         dec.zero_grad()
         total_loss_dec.backward()
         optimizer_d.step()
@@ -379,18 +334,18 @@ if __name__ == "__main__":
       hardloss_se_all = []; trainacc_se_all = []
       for sei in range(1, args.num_se + 1):
         se = eval("ae.se" + str(sei)); optimizer = optimizer_se[sei-1]; ema = ema_se[sei-1]
-        
         loss_se = 0
         for i in range(len(imgrec_all)):
           logits = se(tensor_normalize(imgrec_all[i].detach()))
-          logits_DT = se(tensor_normalize(imgrec_DT_all[i].detach()))
           hardloss = nn.CrossEntropyLoss()(logits, label) * args.lw_hard
-          hardloss_DT = nn.CrossEntropyLoss()(logits_DT, label) * args.lw_DA
-          loss_se += hardloss + hardloss_DT
+          loss_se += hardloss
+          if args.lw_DT:
+            logits_DT = se(tensor_normalize(imgrec_DT_all[i].detach()))
+            hardloss_DT = nn.CrossEntropyLoss()(logits_DT, label) * args.lw_DT
+            loss_se += hardloss_DT
           pred = logits.detach().max(1)[1]; trainacc = pred.eq(label.view_as(pred)).sum().item() / label.size(0)
           hardloss_se_all.append(hardloss.item()); trainacc_se_all.append(trainacc)
           history_acc_se_all[i] = history_acc_se_all[i] * args.history_acc_weight + trainacc * (1 - args.history_acc_weight)
-        
         se.zero_grad()
         loss_se.backward()
         optimizer.step()
@@ -404,37 +359,21 @@ if __name__ == "__main__":
         # save some test images
         logprint(("E{:0>%s}S{:0>%s} | Saving image samples" % (num_digit_show_epoch, num_digit_show_step)).format(epoch, step))
         onehot_label = torch.eye(args.num_class)
-        test_codes = torch.cat([torch.randn([args.num_class, args.num_z]), onehot_label], dim=1)
-        test_labels = onehot_label.numpy().argmax(axis=1)        
+        test_codes = torch.randn([args.num_class, args.num_z])
+        
         for i in range(len(test_codes)):
           x = test_codes[i].cuda().unsqueeze(0)
           for di in range(1, args.num_dec + 1):
-            dec = eval("ae.d%s" % di); masknet = ae.mask; metanet = ae.meta
-            # imgrecs = dec(x); mask = masknet(x)
-            # imgrecs_masked = torch.zeros_like(imgrecs).cuda()
-            # for k in range(imgrecs.size(1)):
-              # imgrecs_masked[:,k,:,:] = mask.squeeze(1).mul(imgrecs[:,k,:,:])
-            
-            meta_layer = metanet(x)
-            w1 = meta_layer[0]; w1 = w1.view(32, 64, 3, 3)
-            w2 = meta_layer[1]; w2 = w2.view(32, 32, 3, 3)
-            w3 = meta_layer[2]; w3 = w3.view(16, 32, 3, 3)
-            w4 = meta_layer[3]; w4 = w4.view( 3, 16, 3, 3)
-            feat = dec(x)
-            feat = F.relu(ae.bn1(F.conv2d(feat, w1, padding=1)), inplace=True)
-            feat = F.relu(ae.bn2(F.conv2d(feat, w2, padding=1)), inplace=True); feat = ae.upscale(feat)
-            feat = F.relu(ae.bn3(F.conv2d(feat, w3, padding=1)), inplace=True)
-            imgrecs = F.sigmoid(ae.bn4(F.conv2d(feat, w4, padding=1)))
-            
+            dec = eval("ae.d%s" % di)
+            imgrecs = dec(x)
             imgs = torch.split(imgrecs, 3, dim=1)
-            # imgs_masked = torch.split(imgrecs_masked, 3, dim=1)
             for bi in range(len(imgs)):
-              img1, img2 = imgs[bi], imgs[bi]
-              out_img1_path = pjoin(rec_img_path, "%s_E%sS%s_d%s_b%s_label%s.jpg"        % (ExpID, epoch, step, di, bi, test_labels[i]))
-              out_img2_path = pjoin(rec_img_path, "%s_E%sS%s_d%s_b%s_masked_label%s.jpg" % (ExpID, epoch, step, di, bi, test_labels[i]))
+              img1 = imgs[bi]
+              logits = ae.be(img1)[0]
+              test_label = logits.argmax().item()
+              out_img1_path = pjoin(rec_img_path, "%s_E%sS%s_d%s_b%s_imgrec%s_label%s.jpg" % (ExpID, epoch, step, di, bi, i, test_label))
               vutils.save_image(img1.data.cpu().float(), out_img1_path)
-              vutils.save_image(img2.data.cpu().float(), out_img2_path)
-            
+
       # Test and save models
       if step % args.test_interval == 0:
         ae.eval()
