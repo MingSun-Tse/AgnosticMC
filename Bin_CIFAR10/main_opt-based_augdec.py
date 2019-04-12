@@ -86,7 +86,7 @@ parser.add_argument('--msgan_option', type=str, default="pixel")
 parser.add_argument('--noise_magnitude', type=float, default=0)
 parser.add_argument('--CodeID', type=str)
 parser.add_argument('--clip_actimax', action="store_true")
-parser.add_argument('--dataset', type=str)
+parser.add_argument('--dataset', type=str, default="MNIST")
 args = parser.parse_args()
 
 # Update and check args
