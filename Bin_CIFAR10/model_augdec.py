@@ -11,8 +11,6 @@ import torch.nn.functional as F
 from torch.autograd import Variable
 import math
 import vgg
-
-
 pjoin = os.path.join
 
 # Exponential Moving Average
@@ -28,7 +26,7 @@ class EMA():
     self.shadow[name] = new_average.clone()
     return new_average
 
-    
+################# CIFAR10 #################
 def preprocess_image(pil_im, resize_im=True):
     """
         Processes image for CNNs
@@ -252,9 +250,9 @@ class SmallVGG19(nn.Module):
     x = self.classifier(x)
     return x
 
-class Normalize(nn.Module):
+class Normalize_CIFAR10(nn.Module):
   def __init__(self):
-    super(Normalize, self).__init__()
+    super(Normalize_CIFAR10, self).__init__()
     self.normalize = nn.Conv2d(3, 3, kernel_size=(1, 1), stride=(1,1), bias=True, groups=3)
     self.normalize.weight = nn.Parameter(torch.from_numpy(np.array(
                                     [[[[1/0.229]]],
@@ -499,8 +497,128 @@ class DVGG19_deconv(nn.Module):
     x = self.relu3(self.deconv3_bn(self.deconv3(x))) # batch x 128 x 16 x 16
     x = self.sigm(self.deconv4(x))                   # batch x 3 x 32 x 32
     return x
+
+################# MNIST #################
+# ref: https://github.com/eriklindernoren/PyTorch-GAN/blob/master/implementations/dcgan/dcgan.py
+class DLeNet5(nn.Module):
+  def __init__(self, input_dim, model=None, fixed=False, gray=False, num_divbranch=1):
+    super(DLeNet5, self).__init__()
+    img_size = 32
+    self.init_size = img_size // 4
+    self.l1 = nn.Sequential(nn.Linear(input_dim, 128 * self.init_size ** 2))
+    self.conv_blocks = nn.Sequential(
+        nn.BatchNorm2d(128),
+        nn.Upsample(scale_factor=2),
+        nn.Conv2d(128, 128, 3, stride=1, padding=1),
+        nn.BatchNorm2d(128, 0.8),
+        nn.LeakyReLU(0.2, inplace=True),
+        nn.Upsample(scale_factor=2),
+        nn.Conv2d(128, 64, 3, stride=1, padding=1),
+        nn.BatchNorm2d(64, 0.8),
+        nn.LeakyReLU(0.2, inplace=True),
+        nn.Conv2d(64, 1, 3, stride=1, padding=1),
+        nn.Sigmoid(),
+        # nn.Tanh(),
+        # nn.BatchNorm2d(1, 0.8), # Ref: Huawei's paper. They add a BN layer at the end of the generator.
+    )
+  def forward(self, z):
+      out = self.l1(z)
+      out = out.view(out.shape[0], 128, self.init_size, self.init_size)
+      img = self.conv_blocks(out)
+      return img
+        
+# Use the LeNet model as https://github.com/iRapha/replayed_distillation/blob/master/models/lenet.py
+class LeNet5(nn.Module):
+  def __init__(self, model=None, fixed=False):
+    super(LeNet5, self).__init__()
+    self.fixed = fixed
     
-# ---------------------------------------------------
+    self.conv1 = nn.Conv2d( 1,  6, kernel_size=(5, 5), stride=(1, 1), padding=(0, 0)); self.pool1 = nn.MaxPool2d(kernel_size=2, stride=2, padding=0)
+    self.conv2 = nn.Conv2d( 6, 16, kernel_size=(5, 5), stride=(1, 1), padding=(0, 0)); self.pool2 = nn.MaxPool2d(kernel_size=2, stride=2, padding=0)
+    self.fc3 = nn.Linear(400, 120)
+    self.fc4 = nn.Linear(120,  84)
+    self.fc5 = nn.Linear( 84,  10)
+    self.relu = nn.ReLU(inplace=True)
+    
+    if model:
+      self.load_state_dict(torch.load(model))
+    if fixed:
+      for param in self.parameters():
+        param.requires_grad = False
+      
+  def forward(self, y):          # input: 1x32x32
+    y = self.relu(self.conv1(y)) # 6x28x28
+    y = self.pool1(y)            # 6x14x14
+    y = self.relu(self.conv2(y)) # 16x10x10
+    y = self.pool2(y)            # 16x5x5
+    y = y.view(y.size(0), -1)    # 400
+    y = self.relu(self.fc3(y))   # 120
+    y = self.relu(self.fc4(y))   # 84
+    y = self.fc5(y)              # 10
+    return y
+  
+  def forward_branch(self, y):
+    y = self.relu(self.conv1(y)); out1 = y
+    y = self.pool1(y)
+    y = self.relu(self.conv2(y)); out2 = y
+    y = self.pool2(y)
+    y = y.view(y.size(0), -1)
+    y = self.relu(self.fc3(y)); out3 = y
+    y = self.relu(self.fc4(y)); out4 = y
+    y = self.fc5(y)
+    return out1, out2, out3, out4, y
+
+class SmallLeNet5(nn.Module):
+  def __init__(self, model=None, fixed=False):
+    super(SmallLeNet5, self).__init__()
+    self.fixed = fixed
+    
+    self.conv1 = nn.Conv2d( 1,  3, kernel_size=(5, 5), stride=(1, 1), padding=(0, 0)); self.pool1 = nn.MaxPool2d(kernel_size=2, stride=2, padding=0)
+    self.conv2 = nn.Conv2d( 3,  8, kernel_size=(5, 5), stride=(1, 1), padding=(0, 0)); self.pool2 = nn.MaxPool2d(kernel_size=2, stride=2, padding=0)
+    self.fc3 = nn.Linear(200, 120)
+    self.fc4 = nn.Linear(120,  84)
+    self.fc5 = nn.Linear( 84,  10)
+    self.relu = nn.ReLU(inplace=True)
+    
+    if model:
+      self.load_state_dict(torch.load(model))
+    if fixed:
+      for param in self.parameters():
+          param.requires_grad = False
+      
+  def forward(self, y):
+    y = self.relu(self.conv1(y))
+    y = self.pool1(y)
+    y = self.relu(self.conv2(y))
+    y = self.pool2(y)
+    y = y.view(y.size(0), -1)
+    y = self.relu(self.fc3(y))
+    y = self.relu(self.fc4(y))
+    y = self.fc5(y)
+    return y
+  
+  def forward_branch(self, y):
+    y = self.relu(self.conv1(y)); out1 = y
+    y = self.pool1(y)
+    y = self.relu(self.conv2(y)); out2 = y
+    y = self.pool2(y)
+    y = y.view(y.size(0), -1)
+    y = self.relu(self.fc3(y)); out3 = y
+    y = self.relu(self.fc4(y)); out4 = y
+    y = self.fc5(y)
+    return out1, out2, out3, out4, y    
+
+class Normalize_MNIST(nn.Module):
+  def __init__(self):
+    super(Normalize_MNIST, self).__init__()
+    self.normalize = nn.Conv2d(1, 1, kernel_size=(1, 1), stride=(1, 1), bias=True, groups=1)
+    self.normalize.weight = nn.Parameter(torch.from_numpy(np.array([[[[1/0.3081]]]])).float())
+    self.normalize.bias   = nn.Parameter(torch.from_numpy(np.array([-0.1307/0.3081])).float())
+    self.normalize.requires_grad = False
+  def forward(self, x):
+    return self.normalize(x)
+    
+################# Transform #################
 class Transform2(nn.Module): # drop out
   def __init__(self):
     super(Transform2, self).__init__()
@@ -584,9 +702,9 @@ class Transform10(nn.Module): # smooth
   def forward(self, x):
     return self.conv1(x)
     
-class Transform8(nn.Module): # random transform combination
+class Transform(nn.Module): # random transform combination
   def __init__(self):
-    super(Transform8, self).__init__()
+    super(Transform, self).__init__()
     self.T2  = Transform2()
     self.T4  = Transform4()
     self.T6  = Transform6()
@@ -609,21 +727,24 @@ class Transform8(nn.Module): # random transform combination
     return y    
 
 # ---------------------------------------------------
-# AutoEncoder part
-BE  = VGG19      # Big Encoder
-Dec = DVGG19_aug # Decoder
-SE  = SmallVGG19 # Small Encoder
-
 class AutoEncoder_GAN4(nn.Module):
   def __init__(self, args):
     super(AutoEncoder_GAN4, self).__init__()
+    if args.dataset == "CIFAR10":
+      BE = VGG19; Dec = DVGG19_aug; SE = SmallVGG19
+      self.normalize = Normalize_CIFAR10()
+    elif args.dataset == "MNIST":
+      BE = LeNet5; Dec = DLeNet5; SE = SmallLeNet5
+      self.normalize = Normalize_MNIST()
+    
     self.be = BE(args.e1, fixed=True).eval()
-    self.defined_trans = Transform8()
+    self.defined_trans = Transform()
     self.upscale = nn.UpsamplingNearest2d(scale_factor=2)
     self.bn1 = nn.BatchNorm2d(32)
     self.bn2 = nn.BatchNorm2d(32)
     self.bn3 = nn.BatchNorm2d(16)
     self.bn4 = nn.BatchNorm2d( 3)
+    
     for di in range(1, args.num_dec + 1):
       pretrained_model = None
       if args.pretrained_dir:
@@ -635,6 +756,7 @@ class AutoEncoder_GAN4(nn.Module):
       self.__setattr__("d" + str(di), Dec(input_dim, pretrained_model, fixed=False, gray=args.gray, num_divbranch=args.num_divbranch))
       self.mask = MaskNet(input_dim)
       self.meta = MetaNet(input_dim)
+    
     for sei in range(1, args.num_se + 1):
       self.__setattr__("se" + str(sei), SE(None, fixed=False))
       
