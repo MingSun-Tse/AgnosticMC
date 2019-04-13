@@ -68,6 +68,7 @@ parser.add_argument('-p', '--project_name', type=str, default="test")
 parser.add_argument('-r', '--resume', action='store_true')
 parser.add_argument('-m', '--mode', type=str, default="GAN4", help='the training mode name.')
 parser.add_argument('--use_pseudo_code', action="store_false")
+parser.add_argument('--use_random_input', action="store_false")
 parser.add_argument('--begin', type=float, default=25)
 parser.add_argument('--end',   type=float, default=20)
 parser.add_argument('--temp',  type=float, default=1, help="the tempature in KD")
@@ -171,117 +172,125 @@ if __name__ == "__main__":
   for epoch in range(previous_epoch, args.num_epoch):
     for step, (img, label) in enumerate(train_loader):
       ae.train()
-      # Generate codes randomly
-      if args.lw_msgan:
-        random_z1 = torch.cuda.FloatTensor(int(args.batch_size/2), args.num_z); random_z1.copy_(torch.randn(int(args.batch_size/2), args.num_z))
-        random_z2 = torch.cuda.FloatTensor(int(args.batch_size/2), args.num_z); random_z2.copy_(torch.randn(int(args.batch_size/2), args.num_z))
-        x = torch.cat([random_z1, random_z2], dim=0)
-      else:
-        x = torch.cuda.FloatTensor(args.batch_size, args.num_z); random_z1.copy_(torch.randn(args.batch_size, args.num_z))
-      
-      # Update decoder
       imgrec_all = []; logits_all = []; imgrec_DT_all = []; hardloss_dec_all = []; trainacc_dec_all = []
-      for di in range(1, args.num_dec + 1):
-        # Set up model and ema
-        dec = eval("ae.d" + str(di)); optimizer_d = optimizer_dec[di-1]; ema_d = ema_dec[di-1]
-        total_loss_dec = 0
-
-        # Forward
-        imgrecs = dec(x)
-        
-        ## Diversity encouraging loss: MSGAN
-        # ref: 2019 CVPR Mode Seeking Generative Adversarial Networks for Diverse Image Synthesis
+      
+      if not args.use_random_input:
+        # Generate codes randomly
         if args.lw_msgan:
-          if args.msgan_option == "pixel":
-            imgrecs_1, imgrecs_2 = torch.split(imgrecs, int(args.batch_size/2), dim=0)
-            lz_pixel = torch.mean(torch.abs(imgrecs_1 - imgrecs_2)) / torch.mean(torch.abs(random_z1 - random_z2))
-          elif args.msgan_option == "pixelgray": # deprecated
-            imgrecs_1, imgrecs_2 = torch.split(imgrecs, int(args.batch_size/2), dim=0)
-            imgrecs_1 = imgrecs_1[:,0,:,:] * 0.299 + imgrecs_1[:,1,:,:] * 0.587 + imgrecs_1[:,2,:,:] * 0.114 # the Y channel (Luminance) of an image
-            imgrecs_2 = imgrecs_2[:,0,:,:] * 0.299 + imgrecs_2[:,1,:,:] * 0.587 + imgrecs_2[:,2,:,:] * 0.114
-            lz_pixel = torch.mean(torch.abs(imgrecs_1 - imgrecs_2)) / torch.mean(torch.abs(random_z1 - random_z2))
-          loss_diversity_pixel = -args.lw_msgan * lz_pixel
-          total_loss_dec += loss_diversity_pixel
+          random_z1 = torch.cuda.FloatTensor(int(args.batch_size/2), args.num_z); random_z1.copy_(torch.randn(int(args.batch_size/2), args.num_z))
+          random_z2 = torch.cuda.FloatTensor(int(args.batch_size/2), args.num_z); random_z2.copy_(torch.randn(int(args.batch_size/2), args.num_z))
+          x = torch.cat([random_z1, random_z2], dim=0)
+        else:
+          x = torch.cuda.FloatTensor(args.batch_size, args.num_z); random_z1.copy_(torch.randn(args.batch_size, args.num_z))
         
-        imgrecs_split = torch.split(imgrecs, num_channel, dim=1)
-        actimax_loss_print = []
-        for imgrec in imgrecs_split:
-          # forward
-          imgrec_all.append(imgrec) # for SE
-          feats = ae.be.forward_branch(imgrec)
-          logits = feats[-1]; last_feature = feats[-2]
-          logits_all.append(logits.detach())
-          label = logits.argmax(dim=1)
-          
-          ## Low-level natural image prior: tv + image norm
-          # ref: 2015 CVPR Understanding Deep Image Representations by Inverting Them
-          tvloss = args.lw_tv * (torch.sum(torch.abs(imgrec[:, :, :, :-1] - imgrec[:, :, :, 1:])) + 
-                                 torch.sum(torch.abs(imgrec[:, :, :-1, :] - imgrec[:, :, 1:, :])))
-          # total_loss_dec += tvloss
-          imgnorm = torch.pow(torch.norm(imgrec, p=6), 6) * args.lw_norm
-          # total_loss_dec += imgnorm
-          
-          ## Classification loss, the bottomline loss
-          hardloss = nn.CrossEntropyLoss()(logits, label) * args.lw_hard
-          
-          total_loss_dec += hardloss
-          if args.lw_DT:
-            imgrec_DT = ae.defined_trans(imgrec) # DT: defined transform
-            imgrec_DT_all.append(imgrec_DT) # for SE
-            logits_DT = ae.be(imgrec_DT)
-            total_loss_dec += nn.CrossEntropyLoss()(logits_DT, label) * args.lw_DT
-          # for accuracy print
-          pred = logits.detach().max(1)[1]; trainacc = pred.eq(label.view_as(pred)).sum().item() / label.size(0)
-          hardloss_dec_all.append(hardloss.item()); trainacc_dec_all.append(trainacc)
-          index = len(imgrec_all) - 1
-          
-          ## Adversarial loss, combat with SE
-          if args.lw_adv:
-            for sei in range(1, args.num_se + 1):
-              se = eval("ae.se" + str(sei))
-              logits_dse = se(imgrec)
-              total_loss_dec += args.lw_adv / nn.CrossEntropyLoss()(logits_dse, label)
-          
-          ## Activation maximization loss
-          # ref: 2016 IJCV Visualizing Deep Convolutional Neural Networks Using Natural Pre-images
-          if args.clip_actimax and epoch >= 7:
-            args.lw_actimax = 0
-          if args.lw_actimax:
-            rand_loss_weight = torch.rand_like(logits) * args.noise_magnitude
-            for i in range(logits.size(0)):
-              rand_loss_weight[i, label[i]] = 1
-            actimax_loss = -args.lw_actimax * (torch.dot(logits.flatten(), rand_loss_weight.flatten()) / logits.size(0))
-            actimax_loss_print.append(actimax_loss.item())
-            total_loss_dec += actimax_loss
-          
-          ## Huawei's idea
-          if args.lw_feat_L1_norm:
-            L_alpha = -torch.norm(last_feature, p=1) / last_feature.size(0) * args.lw_feat_L1_norm
-            total_loss_dec += L_alpha 
-          if args.lw_class_balance:
-            pred_prob = logits.softmax(dim=1).mean(dim=0)
-            L_ie = torch.dot(pred_prob, torch.log(pred_prob)) / args.num_class * args.lw_class_balance
-            total_loss_dec += L_ie 
-          
-        dec.zero_grad()
-        total_loss_dec.backward()
-        optimizer_d.step()
-        for name, param in dec.named_parameters():
-          if param.requires_grad:
-            param.data = ema_d(name, param.data)        
-        # Gradient checking
-        if args.show_interval_gradient and step % args.show_interval_gradient == 0:
-          ave_grad = []
-          for p in dec.named_parameters():
-            layer_name = p[0]
-            if "bias" in layer_name: continue
-            if p[1].grad is not None:
-              ave_grad.append([layer_name, np.average(p[1].grad.abs()) * args.lr, np.average(p[1].data.abs())])
-          ave_grad = ["{:<30} {:.6f}  /  {:.6f}  ({:.10f})\n".format(x[0], x[1], x[2], x[1]/x[2]) for x in ave_grad]
-          ave_grad = "".join(ave_grad)
-          logprint(("E{:0>%s}S{:0>%s} (grad x lr) / weight:\n{}" % (num_digit_show_epoch, num_digit_show_step)).format(epoch, step, ave_grad))
+        # Update decoder
+        for di in range(1, args.num_dec + 1):
+          # Set up model and ema
+          dec = eval("ae.d" + str(di)); optimizer_d = optimizer_dec[di-1]; ema_d = ema_dec[di-1]
+          total_loss_dec = 0
 
-     # Update SE
+          # Forward
+          imgrecs = dec(x)
+          
+          ## Diversity encouraging loss: MSGAN
+          # ref: 2019 CVPR Mode Seeking Generative Adversarial Networks for Diverse Image Synthesis
+          if args.lw_msgan:
+            if args.msgan_option == "pixel":
+              imgrecs_1, imgrecs_2 = torch.split(imgrecs, int(args.batch_size/2), dim=0)
+              lz_pixel = torch.mean(torch.abs(imgrecs_1 - imgrecs_2)) / torch.mean(torch.abs(random_z1 - random_z2))
+            elif args.msgan_option == "pixelgray": # deprecated
+              imgrecs_1, imgrecs_2 = torch.split(imgrecs, int(args.batch_size/2), dim=0)
+              imgrecs_1 = imgrecs_1[:,0,:,:] * 0.299 + imgrecs_1[:,1,:,:] * 0.587 + imgrecs_1[:,2,:,:] * 0.114 # the Y channel (Luminance) of an image
+              imgrecs_2 = imgrecs_2[:,0,:,:] * 0.299 + imgrecs_2[:,1,:,:] * 0.587 + imgrecs_2[:,2,:,:] * 0.114
+              lz_pixel = torch.mean(torch.abs(imgrecs_1 - imgrecs_2)) / torch.mean(torch.abs(random_z1 - random_z2))
+            loss_diversity_pixel = -args.lw_msgan * lz_pixel
+            total_loss_dec += loss_diversity_pixel
+          
+          imgrecs_split = torch.split(imgrecs, num_channel, dim=1)
+          actimax_loss_print = []
+          for imgrec in imgrecs_split:
+            # forward
+            imgrec_all.append(imgrec) # for SE
+            feats = ae.be.forward_branch(imgrec)
+            logits = feats[-1]; last_feature = feats[-2]
+            logits_all.append(logits.detach())
+            label = logits.argmax(dim=1)
+            
+            ## Low-level natural image prior: tv + image norm
+            # ref: 2015 CVPR Understanding Deep Image Representations by Inverting Them
+            tvloss = args.lw_tv * (torch.sum(torch.abs(imgrec[:, :, :, :-1] - imgrec[:, :, :, 1:])) + 
+                                   torch.sum(torch.abs(imgrec[:, :, :-1, :] - imgrec[:, :, 1:, :])))
+            # total_loss_dec += tvloss
+            imgnorm = torch.pow(torch.norm(imgrec, p=6), 6) * args.lw_norm
+            # total_loss_dec += imgnorm
+            
+            ## Classification loss, the bottomline loss
+            hardloss = nn.CrossEntropyLoss()(logits, label) * args.lw_hard
+            
+            total_loss_dec += hardloss
+            if args.lw_DT:
+              imgrec_DT = ae.defined_trans(imgrec) # DT: defined transform
+              imgrec_DT_all.append(imgrec_DT) # for SE
+              logits_DT = ae.be(imgrec_DT)
+              total_loss_dec += nn.CrossEntropyLoss()(logits_DT, label) * args.lw_DT
+            # for accuracy print
+            pred = logits.detach().max(1)[1]; trainacc = pred.eq(label.view_as(pred)).sum().item() / label.size(0)
+            hardloss_dec_all.append(hardloss.item()); trainacc_dec_all.append(trainacc)
+            index = len(imgrec_all) - 1
+            
+            ## Adversarial loss, combat with SE
+            if args.lw_adv:
+              for sei in range(1, args.num_se + 1):
+                se = eval("ae.se" + str(sei))
+                logits_dse = se(imgrec)
+                total_loss_dec += args.lw_adv / nn.CrossEntropyLoss()(logits_dse, label)
+            
+            ## Activation maximization loss
+            # ref: 2016 IJCV Visualizing Deep Convolutional Neural Networks Using Natural Pre-images
+            if args.clip_actimax and epoch >= 7:
+              args.lw_actimax = 0
+            if args.lw_actimax:
+              rand_loss_weight = torch.rand_like(logits) * args.noise_magnitude
+              for i in range(logits.size(0)):
+                rand_loss_weight[i, label[i]] = 1
+              actimax_loss = -args.lw_actimax * (torch.dot(logits.flatten(), rand_loss_weight.flatten()) / logits.size(0))
+              actimax_loss_print.append(actimax_loss.item())
+              total_loss_dec += actimax_loss
+            
+            ## Huawei's idea
+            if args.lw_feat_L1_norm:
+              L_alpha = -torch.norm(last_feature, p=1) / last_feature.size(0) * args.lw_feat_L1_norm
+              total_loss_dec += L_alpha 
+            if args.lw_class_balance:
+              pred_prob = logits.softmax(dim=1).mean(dim=0)
+              L_ie = torch.dot(pred_prob, torch.log(pred_prob)) / args.num_class * args.lw_class_balance
+              total_loss_dec += L_ie 
+            
+          dec.zero_grad()
+          total_loss_dec.backward()
+          optimizer_d.step()
+          for name, param in dec.named_parameters():
+            if param.requires_grad:
+              param.data = ema_d(name, param.data)        
+          # Gradient checking
+          if args.show_interval_gradient and step % args.show_interval_gradient == 0:
+            ave_grad = []
+            for p in dec.named_parameters():
+              layer_name = p[0]
+              if "bias" in layer_name: continue
+              if p[1].grad is not None:
+                ave_grad.append([layer_name, np.average(p[1].grad.abs()) * args.lr, np.average(p[1].data.abs())])
+            ave_grad = ["{:<30} {:.6f}  /  {:.6f}  ({:.10f})\n".format(x[0], x[1], x[2], x[1]/x[2]) for x in ave_grad]
+            ave_grad = "".join(ave_grad)
+            logprint(("E{:0>%s}S{:0>%s} (grad x lr) / weight:\n{}" % (num_digit_show_epoch, num_digit_show_step)).format(epoch, step, ave_grad))
+      else:
+        x = torch.randn_like(image).cuda()
+        imgrec_all.append(x)
+        logits = ae.be(x)
+        logits_all.append(logits)
+        label = logits.argmax(dim=1)
+        
+      # Update SE
       hardloss_se_all = []; trainacc_se_all = []
       for sei in range(1, args.num_se + 1):
         se = eval("ae.se" + str(sei)); optimizer = optimizer_se[sei-1]; ema = ema_se[sei-1]
