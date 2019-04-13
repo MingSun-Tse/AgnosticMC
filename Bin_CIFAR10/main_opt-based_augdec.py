@@ -77,9 +77,7 @@ parser.add_argument('--show_interval', type=int, default=10, help="the interval 
 parser.add_argument('--show_interval_gradient', type=int, default=0, help="the interval to print gradient")
 parser.add_argument('--save_interval', type=int, default=100, help="the interval to save sample images")
 parser.add_argument('--test_interval', type=int, default=1000, help="the interval to test and save models")
-parser.add_argument('--classloss_update_interval', type=int, default=1)
 parser.add_argument('--gray', action="store_true")
-parser.add_argument('--acc_thre_reset_dec', type=float, default=0)
 parser.add_argument('--history_acc_weight', type=float, default=0.25)
 parser.add_argument('--msgan_option', type=str, default="pixel")
 parser.add_argument('--noise_magnitude', type=float, default=0)
@@ -179,7 +177,7 @@ if __name__ == "__main__":
     for step, (img, label) in enumerate(train_loader):
       ae.train()
       # Generate codes randomly
-      random_z1 = torch.cuda.FloatTensor(args.batch_size, args.num_z); random_z1.copy_(torch.randn(args.batch_size, args.num_z))
+      random_z1 = torch.cuda.FloatTensor(args.batch_size, args.num_z); random_z1.copy_(torch.randn(args.batch_size, args.num_z) * 0.5)
       if args.lw_msgan:
         random_z2 = torch.cuda.FloatTensor(args.batch_size, args.num_z); random_z2.copy_(torch.randn(args.batch_size, args.num_z))
         x = torch.cat([random_z1, random_z2], dim=0)
@@ -195,6 +193,8 @@ if __name__ == "__main__":
 
         # Forward
         imgrecs = dec(x)
+        if step % 10 == 0:
+          print(imgrecs)
         
         ## Diversity encouraging loss: MSGAN
         # ref: 2019 CVPR Mode Seeking Generative Adversarial Networks for Diverse Image Synthesis
@@ -218,6 +218,7 @@ if __name__ == "__main__":
           feats = ae.be.forward_branch(imgrec)
           logits = feats[-1]; last_feature = feats[-2]
           label = logits.argmax(dim=1)
+          print(logits, label)
           
           ## Low-level natural image prior: tv + image norm
           # ref: 2015 CVPR Understanding Deep Image Representations by Inverting Them
@@ -228,7 +229,6 @@ if __name__ == "__main__":
           # total_loss_dec += imgnorm
           
           ## Classification loss, the bottomline loss
-          # print(logits.data.cpu().numpy(), label.data.cpu().numpy())
           hardloss = nn.CrossEntropyLoss()(logits, label) * args.lw_hard
           
           total_loss_dec += hardloss

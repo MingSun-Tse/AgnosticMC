@@ -500,9 +500,9 @@ class DVGG19_deconv(nn.Module):
 
 ################# MNIST #################
 # ref: https://github.com/eriklindernoren/PyTorch-GAN/blob/master/implementations/dcgan/dcgan.py
-class DLeNet5(nn.Module):
+class DLeNet5_deconv(nn.Module):
   def __init__(self, input_dim, model=None, fixed=False, gray=False, num_divbranch=1):
-    super(DLeNet5, self).__init__()
+    super(DLeNet5_deconv, self).__init__()
     img_size = 32
     self.init_size = img_size // 4
     self.l1 = nn.Sequential(nn.Linear(input_dim, 128 * self.init_size ** 2))
@@ -518,14 +518,49 @@ class DLeNet5(nn.Module):
         nn.LeakyReLU(0.2, inplace=True),
         nn.Conv2d(64, 1, 3, stride=1, padding=1),
         nn.Tanh(),
-        nn.BatchNorm2d(1, 0.8), # Ref: Huawei's paper. They add a BN layer at the end of the generator.
     )
+    # nn.BatchNorm2d(1, 0.8), # Ref: Huawei's paper. They add a BN layer at the end of the generator.
   def forward(self, z):
       out = self.l1(z)
       out = out.view(out.shape[0], 128, self.init_size, self.init_size)
       img = self.conv_blocks(out)
       return img
         
+class DLeNet5_upsample(nn.Module):
+  def __init__(self, input_dim, model=None, fixed=False, gray=False, num_divbranch=1):
+    super(DLeNet5_upsample, self).__init__()
+    self.fixed = fixed
+    
+    self.fc5 = nn.Linear(input_dim, 84)
+    self.fc4 = nn.Linear( 84, 120)
+    self.fc3 = nn.Linear(120, 400)
+    self.conv2 = nn.Conv2d(16, 6, kernel_size=(5, 5), stride=(1, 1), padding=(2, 2)) # to maintain the spatial size, so padding=2
+    self.conv1 = nn.Conv2d( 6, 1, kernel_size=(5, 5), stride=(1, 1), padding=(2, 2))
+    
+    self.relu = nn.ReLU(inplace=True)
+    self.sigm = nn.Sigmoid()
+    self.unpool = nn.UpsamplingNearest2d(scale_factor=2)
+    self.pad = nn.ReflectionPad2d((2,2,2,2))
+    
+    if model:
+      self.load_state_dict(torch.load(model))
+    if fixed:
+      for param in self.parameters():
+          param.requires_grad = False
+      
+  def forward(self, y):          # input: 10
+    y = self.relu(self.fc5(y))   # 84
+    y = self.relu(self.fc4(y))   # 120
+    y = self.relu(self.fc3(y))   # 400
+    y = y.view(-1, 16, 5, 5)     # 16x5x5
+    y = self.unpool(y)           # 16x10x10
+    y = self.pad(y)              # 16x14x14
+    y = self.relu(self.conv2(y)) # 6x14x14
+    y = self.unpool(y)           # 6x28x28
+    y = self.pad(y)              # 6x32x32
+    y = self.relu(self.conv1(y)) # 1x32x32
+    return y
+    
 # Use the LeNet model as https://github.com/iRapha/replayed_distillation/blob/master/models/lenet.py
 class LeNet5(nn.Module):
   def __init__(self, model=None, fixed=False):
@@ -565,7 +600,7 @@ class LeNet5(nn.Module):
     y = self.relu(self.fc3(y)); out3 = y
     y = self.relu(self.fc4(y)); out4 = y
     y = self.fc5(y)
-    return out1, out2, out3, out4, y
+    return out2, y
 
 class SmallLeNet5(nn.Module):
   def __init__(self, model=None, fixed=False):
@@ -733,10 +768,10 @@ class AutoEncoder_GAN4(nn.Module):
       BE = VGG19; Dec = DVGG19_aug; SE = SmallVGG19
       self.normalize = Normalize_CIFAR10()
     elif args.dataset == "MNIST":
-      BE = LeNet5; Dec = DLeNet5; SE = SmallLeNet5
+      BE = LeNet5; Dec = DLeNet5_deconv; SE = SmallLeNet5
       self.normalize = Normalize_MNIST()
     
-    self.be = BE(args.e1, fixed=True).eval()
+    self.be = BE(args.e1, fixed=True)
     self.defined_trans = Transform()
     self.upscale = nn.UpsamplingNearest2d(scale_factor=2)
     self.bn1 = nn.BatchNorm2d(32)
@@ -757,7 +792,7 @@ class AutoEncoder_GAN4(nn.Module):
       self.meta = MetaNet(input_dim)
     
     for sei in range(1, args.num_se + 1):
-      self.__setattr__("se" + str(sei), SE(None, fixed=False))
+      self.__setattr__("se" + str(sei), SE(args.e2, fixed=False))
       
 AutoEncoders = {
 "GAN4": AutoEncoder_GAN4,
