@@ -68,7 +68,7 @@ parser.add_argument('-p', '--project_name', type=str, default="test")
 parser.add_argument('-r', '--resume', action='store_true')
 parser.add_argument('-m', '--mode', type=str, default="GAN4", help='the training mode name.')
 parser.add_argument('--use_pseudo_code', action="store_false")
-parser.add_argument('--use_random_input', action="store_false")
+parser.add_argument('--use_random_input', action="store_true")
 parser.add_argument('--begin', type=float, default=25)
 parser.add_argument('--end',   type=float, default=20)
 parser.add_argument('--temp',  type=float, default=1, help="the tempature in KD")
@@ -226,17 +226,19 @@ if __name__ == "__main__":
             
             ## Classification loss, the bottomline loss
             hardloss = nn.CrossEntropyLoss()(logits, label) * args.lw_hard
-            
+            hardloss_dec_all.append(hardloss.item())
             total_loss_dec += hardloss
+            # for accuracy print
+            pred = logits.detach().max(1)[1]
+            trainacc = pred.eq(label.view_as(pred)).sum().item() / label.size(0)
+            trainacc_dec_all.append(trainacc)
+            
+            ## Data augmentation loss
             if args.lw_DT:
               imgrec_DT = ae.defined_trans(imgrec) # DT: defined transform
               imgrec_DT_all.append(imgrec_DT) # for SE
               logits_DT = ae.be(imgrec_DT)
               total_loss_dec += nn.CrossEntropyLoss()(logits_DT, label) * args.lw_DT
-            # for accuracy print
-            pred = logits.detach().max(1)[1]; trainacc = pred.eq(label.view_as(pred)).sum().item() / label.size(0)
-            hardloss_dec_all.append(hardloss.item()); trainacc_dec_all.append(trainacc)
-            index = len(imgrec_all) - 1
             
             ## Adversarial loss, combat with SE
             if args.lw_adv:
@@ -284,11 +286,23 @@ if __name__ == "__main__":
             ave_grad = "".join(ave_grad)
             logprint(("E{:0>%s}S{:0>%s} (grad x lr) / weight:\n{}" % (num_digit_show_epoch, num_digit_show_step)).format(epoch, step, ave_grad))
       else:
-        x = torch.randn_like(image).cuda()
-        imgrec_all.append(x)
-        logits = ae.be(x)
+        imgrec = torch.randn_like(img).cuda()
+        imgrec_all.append(imgrec)
+        logits = ae.be(imgrec)
         logits_all.append(logits)
         label = logits.argmax(dim=1)
+        hardloss = nn.CrossEntropyLoss()(logits, label) * args.lw_hard
+        hardloss_dec_all.append(hardloss.item())
+        # for accuracy print
+        pred = logits.detach().max(1)[1]
+        trainacc = pred.eq(label.view_as(pred)).sum().item() / label.size(0)
+        trainacc_dec_all.append(trainacc)
+        
+        ## To maintain the normal log print
+        tvloss  = torch.zeros(1)
+        imgnorm = torch.zeros(1)
+        L_alpha = torch.zeros(1)
+        L_ie    = torch.zeros(1)
         
       # Update SE
       hardloss_se_all = []; trainacc_se_all = []
