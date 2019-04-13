@@ -289,7 +289,7 @@ if __name__ == "__main__":
         for i in range(len(imgrec_all)):
           logits = se(imgrec_all[i].detach())
           hardloss = nn.CrossEntropyLoss()(logits, label) * args.lw_hard
-          # loss_se += hardloss # Huawei's paper does not mention using this hard loss for SE
+          loss_se += hardloss # Huawei's paper does not mention using this hard loss for SE
           hardloss_se_all.append(hardloss.item())
           
           # knowledge distillation loss
