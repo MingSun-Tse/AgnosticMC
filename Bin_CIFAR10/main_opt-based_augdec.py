@@ -336,13 +336,12 @@ if __name__ == "__main__":
             param.data = ema(name, param.data)
       
       # Save sample images
-      if step % args.save_interval == 0:
+      if (not args.use_random_input) and step % args.save_interval == 0:
         ae.eval()
         # save some test images
         logprint(("E{:0>%s}S{:0>%s} | Saving image samples" % (num_digit_show_epoch, num_digit_show_step)).format(epoch, step))
         onehot_label = torch.eye(args.num_class)
         test_codes = torch.randn([args.num_class, args.num_z])
-        
         for i in range(len(test_codes)):
           x = test_codes[i].cuda().unsqueeze(0)
           for di in range(1, args.num_dec + 1):
