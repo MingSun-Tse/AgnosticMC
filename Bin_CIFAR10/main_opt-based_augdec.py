@@ -40,11 +40,11 @@ parser.add_argument('--pretrained_timeid',type=str, default=None, help="the time
 parser.add_argument('--num_dec', type=int, default=1)
 parser.add_argument('--num_se', type=int, default=1)
 parser.add_argument('--num_divbranch', type=int, default=1)
-parser.add_argument('--num_epoch', type=int, default=200)
+parser.add_argument('--num_epoch', type=int, default=250)
 parser.add_argument('--num_class', type=int, default=10)
 parser.add_argument('--num_z', type=int, default=100, help="the dimension of hidden z")
 parser.add_argument('--gpu', type=int,   default=0)
-parser.add_argument('--lr',  type=float, default=1e-3)
+parser.add_argument('--lr',  type=float, default=2e-2)
 parser.add_argument('--b1',  type=float, default=5e-4, help='adam: decay of first order momentum of gradient')
 parser.add_argument('--b2',  type=float, default=0.999, help='adam: decay of second order momentum of gradient')
 # ----------------------------------------------------------------
@@ -58,9 +58,9 @@ parser.add_argument('--lw_masknorm', type=float, default=0) # 1e-5)
 parser.add_argument('--lw_DT',   type=float, default=0) # 10)
 parser.add_argument('--lw_adv',  type=float, default=0)
 parser.add_argument('--lw_actimax',  type=float, default=0)
-parser.add_argument('--lw_msgan',  type=float, default=0) # 100)
+parser.add_argument('--lw_msgan',  type=float, default=1e-30) # 100)
 parser.add_argument('--lw_maskdiversity',  type=float, default=0) # 100)
-parser.add_argument('--lw_feat_L1_norm', type=float, default=0.1)
+parser.add_argument('--lw_feat_L1_norm', type=float, default=-0.1)
 parser.add_argument('--lw_class_balance', type=float, default=5)
 # ----------------------------------------------------------------
 parser.add_argument('-b', '--batch_size', type=int, default=600) # 256)
@@ -116,8 +116,6 @@ if __name__ == "__main__":
   ae = AE(args).cuda()
   
   # Set up exponential moving average
-  history_acc_se_all = []
-  history_acc_dec_all = []
   ema_dec = []; ema_se = []; ema_mask = []; ema_meta = []
   for di in range(1, args.num_dec + 1):
     ema_dec.append(EMA(args.ema_factor))
@@ -135,9 +133,6 @@ if __name__ == "__main__":
     for name, param in metanet.named_parameters():
       if param.requires_grad:
         ema_meta[-1].register(name, param.data)
-    for _ in range(args.num_divbranch):
-      history_acc_se_all.append(0)
-      history_acc_dec_all.append(0)
   for sei in range(1, args.num_se + 1):
     ema_se.append(EMA(args.ema_factor))
     se = eval("ae.se%s" % sei)
@@ -177,15 +172,15 @@ if __name__ == "__main__":
     for step, (img, label) in enumerate(train_loader):
       ae.train()
       # Generate codes randomly
-      random_z1 = torch.cuda.FloatTensor(args.batch_size, args.num_z); random_z1.copy_(torch.randn(args.batch_size, args.num_z) * 0.5)
       if args.lw_msgan:
-        random_z2 = torch.cuda.FloatTensor(args.batch_size, args.num_z); random_z2.copy_(torch.randn(args.batch_size, args.num_z))
+        random_z1 = torch.cuda.FloatTensor(int(args.batch_size/2), args.num_z); random_z1.copy_(torch.randn(int(args.batch_size/2), args.num_z))
+        random_z2 = torch.cuda.FloatTensor(int(args.batch_size/2), args.num_z); random_z2.copy_(torch.randn(int(args.batch_size/2), args.num_z))
         x = torch.cat([random_z1, random_z2], dim=0)
       else:
-        x = random_z1
+        x = torch.cuda.FloatTensor(args.batch_size, args.num_z); random_z1.copy_(torch.randn(args.batch_size, args.num_z))
       
       # Update decoder
-      imgrec_all = []; imgrec_DT_all = []; hardloss_dec_all = []; trainacc_dec_all = []
+      imgrec_all = []; logits_all = []; imgrec_DT_all = []; hardloss_dec_all = []; trainacc_dec_all = []
       for di in range(1, args.num_dec + 1):
         # Set up model and ema
         dec = eval("ae.d" + str(di)); optimizer_d = optimizer_dec[di-1]; ema_d = ema_dec[di-1]
@@ -193,17 +188,15 @@ if __name__ == "__main__":
 
         # Forward
         imgrecs = dec(x)
-        if step % 10 == 0:
-          print(imgrecs)
         
         ## Diversity encouraging loss: MSGAN
         # ref: 2019 CVPR Mode Seeking Generative Adversarial Networks for Diverse Image Synthesis
         if args.lw_msgan:
           if args.msgan_option == "pixel":
-            imgrecs_1, imgrecs_2 = torch.split(imgrecs, args.batch_size, dim=0)
+            imgrecs_1, imgrecs_2 = torch.split(imgrecs, int(args.batch_size/2), dim=0)
             lz_pixel = torch.mean(torch.abs(imgrecs_1 - imgrecs_2)) / torch.mean(torch.abs(random_z1 - random_z2))
           elif args.msgan_option == "pixelgray": # deprecated
-            imgrecs_1, imgrecs_2 = torch.split(imgrecs, args.batch_size, dim=0)
+            imgrecs_1, imgrecs_2 = torch.split(imgrecs, int(args.batch_size/2), dim=0)
             imgrecs_1 = imgrecs_1[:,0,:,:] * 0.299 + imgrecs_1[:,1,:,:] * 0.587 + imgrecs_1[:,2,:,:] * 0.114 # the Y channel (Luminance) of an image
             imgrecs_2 = imgrecs_2[:,0,:,:] * 0.299 + imgrecs_2[:,1,:,:] * 0.587 + imgrecs_2[:,2,:,:] * 0.114
             lz_pixel = torch.mean(torch.abs(imgrecs_1 - imgrecs_2)) / torch.mean(torch.abs(random_z1 - random_z2))
@@ -217,8 +210,8 @@ if __name__ == "__main__":
           imgrec_all.append(imgrec) # for SE
           feats = ae.be.forward_branch(imgrec)
           logits = feats[-1]; last_feature = feats[-2]
+          logits_all.append(logits.detach())
           label = logits.argmax(dim=1)
-          print(logits, label)
           
           ## Low-level natural image prior: tv + image norm
           # ref: 2015 CVPR Understanding Deep Image Representations by Inverting Them
@@ -241,7 +234,6 @@ if __name__ == "__main__":
           pred = logits.detach().max(1)[1]; trainacc = pred.eq(label.view_as(pred)).sum().item() / label.size(0)
           hardloss_dec_all.append(hardloss.item()); trainacc_dec_all.append(trainacc)
           index = len(imgrec_all) - 1
-          history_acc_dec_all[index] = history_acc_dec_all[index] * args.history_acc_weight + trainacc * (1 - args.history_acc_weight)
           
           ## Adversarial loss, combat with SE
           if args.lw_adv:
@@ -297,20 +289,29 @@ if __name__ == "__main__":
         for i in range(len(imgrec_all)):
           logits = se(imgrec_all[i].detach())
           hardloss = nn.CrossEntropyLoss()(logits, label) * args.lw_hard
-          loss_se += hardloss
+          # loss_se += hardloss # Huawei's paper does not mention using this hard loss for SE
+          hardloss_se_all.append(hardloss.item())
+          
+          # knowledge distillation loss
+          kd_loss = nn.KLDivLoss()(F.log_softmax(logits/args.temp, dim=1),
+                        F.softmax(logits_all[i]/args.temp, dim=1)) * (args.temp * args.temp) * args.lw_soft
+          loss_se += kd_loss
+          
           if args.lw_DT:
             logits_DT = se(imgrec_DT_all[i].detach())
             hardloss_DT = nn.CrossEntropyLoss()(logits_DT, label) * args.lw_DT
             loss_se += hardloss_DT
+          
           pred = logits.detach().max(1)[1]; trainacc = pred.eq(label.view_as(pred)).sum().item() / label.size(0)
-          hardloss_se_all.append(hardloss.item()); trainacc_se_all.append(trainacc)
-          history_acc_se_all[i] = history_acc_se_all[i] * args.history_acc_weight + trainacc * (1 - args.history_acc_weight)
+          trainacc_se_all.append(trainacc)
         se.zero_grad()
         loss_se.backward()
         optimizer.step()
         for name, param in se.named_parameters():
           if param.requires_grad:
             param.data = ema(name, param.data)
+        
+        # KD loss ref: https://github.com/peterliht/knowledge-distillation-pytorch/blob/master/model/net.py
       
       # Save sample images
       if step % args.save_interval == 0:
@@ -325,7 +326,7 @@ if __name__ == "__main__":
           for di in range(1, args.num_dec + 1):
             dec = eval("ae.d%s" % di)
             imgrecs = dec(x)
-            imgs = torch.split(imgrecs, 3, dim=1)
+            imgs = torch.split(imgrecs, num_channel, dim=1)
             for bi in range(len(imgs)):
               img1 = imgs[bi]
               logits = ae.be(img1)[0]
@@ -353,20 +354,20 @@ if __name__ == "__main__":
       # Print training loss
       if step % args.show_interval == 0:
         format_str1 = "E{:0>%s}S{:0>%s}" % (num_digit_show_epoch, num_digit_show_step)
-        format_str2 = " | dec:" + " {:.3f}({:.3f}-{:.3f})" * args.num_dec * args.num_divbranch
-        format_str3 = " | se:" + " {:.3f}({:.3f}-{:.3f})" * args.num_dec * args.num_divbranch 
-        format_str4 = " | tv: {:.3f} norm: {:.3f} L_alpha: {:.3f} L_ie: {:.3f}"
+        format_str2 = " | dec:" + " {:.3f}({:.3f}" * args.num_dec * args.num_divbranch
+        format_str3 = " | (se:" + " {:.3f}({:.3f})" * args.num_dec * args.num_divbranch 
+        format_str4 = " | (tv: {:.3f} norm: {:.3f}) L_alpha: {:.3f} L_ie: {:.3f} kd_se: {:.3f}"
         format_str5 = " ({:.3f}s/step)"
         format_str = "".join([format_str1, format_str2, format_str3, format_str4, format_str5])
         strvalue2 = []; strvalue3 = []
         for i in range(args.num_dec * args.num_divbranch):
-          strvalue2.append(hardloss_dec_all[i]); strvalue2.append(trainacc_dec_all[i]); strvalue2.append(history_acc_dec_all[i])
-          strvalue3.append(hardloss_se_all[i]); strvalue3.append(trainacc_se_all[i]); strvalue3.append(history_acc_se_all[i])
+          strvalue2.append(hardloss_dec_all[i]); strvalue2.append(trainacc_dec_all[i])
+          strvalue3.append(hardloss_se_all[i]); strvalue3.append(trainacc_se_all[i])
         logprint(format_str.format(
             epoch, step,
             *strvalue2,
             *strvalue3,
-            tvloss.item(), imgnorm.item(), L_alpha.item(), L_ie.item(),
+            tvloss.item(), imgnorm.item(), L_alpha.item(), L_ie.item(), kd_loss.item(),
             (time.time() - t1) / args.show_interval))
 
         t1 = time.time()
