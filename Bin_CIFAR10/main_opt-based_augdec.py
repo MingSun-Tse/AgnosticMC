@@ -293,6 +293,7 @@ if __name__ == "__main__":
           hardloss_se_all.append(hardloss.item())
           
           # knowledge distillation loss
+          # ref: https://github.com/peterliht/knowledge-distillation-pytorch/blob/master/model/net.py
           kd_loss = nn.KLDivLoss()(F.log_softmax(logits/args.temp, dim=1),
                         F.softmax(logits_all[i]/args.temp, dim=1)) * (args.temp * args.temp) * args.lw_soft
           loss_se += kd_loss
@@ -310,8 +311,6 @@ if __name__ == "__main__":
         for name, param in se.named_parameters():
           if param.requires_grad:
             param.data = ema(name, param.data)
-        
-        # KD loss ref: https://github.com/peterliht/knowledge-distillation-pytorch/blob/master/model/net.py
       
       # Save sample images
       if step % args.save_interval == 0:
