@@ -208,7 +208,7 @@ if __name__ == "__main__":
           actimax_loss_print = []
           for imgrec in imgrecs_split:
             # forward
-            imgrec_all.append(imgrec) # for SE
+            imgrec_all.append(imgrec.detach()) # for SE
             feats = ae.be.forward_branch(imgrec)
             logits = feats[-1]; last_feature = feats[-2]
             logits_all.append(logits.detach())
@@ -289,7 +289,7 @@ if __name__ == "__main__":
         imgrec_all.append(imgrec)
         feats = ae.be.forward_branch(imgrec)
         logits = feats[-1]; last_feature = feats[-2]
-        logits_all.append(logits)
+        logits_all.append(logits.detach())
         label = logits.argmax(dim=1).detach()
         hardloss = nn.CrossEntropyLoss()(logits, label)
         hardloss_dec_all.append(hardloss.item())
@@ -313,7 +313,7 @@ if __name__ == "__main__":
         se = eval("ae.se" + str(sei)); optimizer = optimizer_se[sei-1]; ema = ema_se[sei-1]
         loss_se = 0
         for i in range(len(imgrec_all)):
-          logits = se(imgrec_all[i].detach())
+          logits = se(imgrec_all[i])
           hardloss = nn.CrossEntropyLoss()(logits, label)
           if args.lw_hard: loss_se += hardloss * args.lw_hard # Huawei's paper does not mention using this hard loss for SE
           hardloss_se_all.append(hardloss.item())
