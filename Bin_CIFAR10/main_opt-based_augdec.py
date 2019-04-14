@@ -51,7 +51,8 @@ parser.add_argument('--b2',  type=float, default=0.999, help='adam: decay of sec
 # various losses
 parser.add_argument('--lw_perc', type=float, default=1, help="perceptual loss")
 parser.add_argument('--lw_soft', type=float, default=10) # According to the paper KD, the soft target loss weight should be considarably larger than that of hard target loss.
-parser.add_argument('--lw_hard', type=float, default=1)
+parser.add_argument('--lw_hard_dec', type=float, default=1)
+parser.add_argument('--lw_hard_se', type=float, default=1)
 parser.add_argument('--lw_tv',   type=float, default=1e-6)
 parser.add_argument('--lw_norm', type=float, default=1e-4)
 parser.add_argument('--lw_masknorm', type=float, default=0) # 1e-5)
@@ -226,7 +227,7 @@ if __name__ == "__main__":
             hardloss = torch.zeros(1)
             hardloss = nn.CrossEntropyLoss()(logits, label)
             hardloss_dec_all.append(hardloss.item())
-            if args.lw_hard: total_loss_dec += hardloss * args.lw_hard
+            if args.lw_hard_dec: total_loss_dec += hardloss * args.lw_hard_dec
             # for accuracy print
             pred = logits.detach().max(1)[1]
             trainacc = pred.eq(label.view_as(pred)).sum().item() / label.size(0)
@@ -315,7 +316,7 @@ if __name__ == "__main__":
         for i in range(len(imgrec_all)):
           logits = se(imgrec_all[i])
           hardloss = nn.CrossEntropyLoss()(logits, label)
-          if args.lw_hard: loss_se += hardloss * args.lw_hard # Huawei's paper does not mention using this hard loss for SE
+          if args.lw_hard_se: loss_se += hardloss * args.lw_hard_se # Huawei's paper does not mention using this hard loss for SE
           hardloss_se_all.append(hardloss.item())
           # for accuracy print
           pred = logits.detach().max(1)[1]
@@ -382,7 +383,7 @@ if __name__ == "__main__":
         format_str1 = "E{:0>%s}S{:0>%s}" % (num_digit_show_epoch, num_digit_show_step)
         format_str2 = " | dec:" + " {:.3f}({:.3f})" * args.num_dec * args.num_divbranch
         format_str3 = " | se:" + " {:.3f}({:.3f}) {:.3f}" * args.num_dec * args.num_divbranch 
-        format_str4 = " | tv: {:.3f} norm: {:.3f} L_alpha: {:.3f} L_ie: {:.3f}"
+        format_str4 = " | tv: {:.3f} norm: {:.3f} L_alpha: {:.3f} L_ie: {:.3f} actimax: {:.3f}"
         format_str5 = " ({:.3f}s/step)"
         format_str = "".join([format_str1, format_str2, format_str3, format_str4, format_str5])
         strvalue2 = []; strvalue3 = []
@@ -393,7 +394,7 @@ if __name__ == "__main__":
             epoch, step,
             *strvalue2,
             *strvalue3,
-            tvloss.item(), imgnorm.item(), L_alpha.item(), L_ie.item(),
+            tvloss.item(), imgnorm.item(), L_alpha.item(), L_ie.item(), np.average(actimax_loss_print),
             (time.time() - t1) / args.show_interval))
 
         t1 = time.time()
