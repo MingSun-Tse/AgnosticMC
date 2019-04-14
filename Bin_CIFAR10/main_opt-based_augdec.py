@@ -203,8 +203,7 @@ if __name__ == "__main__":
               imgrecs_1 = imgrecs_1[:,0,:,:] * 0.299 + imgrecs_1[:,1,:,:] * 0.587 + imgrecs_1[:,2,:,:] * 0.114 # the Y channel (Luminance) of an image
               imgrecs_2 = imgrecs_2[:,0,:,:] * 0.299 + imgrecs_2[:,1,:,:] * 0.587 + imgrecs_2[:,2,:,:] * 0.114
               lz_pixel = torch.mean(torch.abs(imgrecs_1 - imgrecs_2)) / torch.mean(torch.abs(random_z1 - random_z2))
-            loss_diversity_pixel = -args.lw_msgan * lz_pixel
-            total_loss_dec += loss_diversity_pixel
+            total_loss_dec += -args.lw_msgan * lz_pixel
           
           imgrecs_split = torch.split(imgrecs, num_channel, dim=1)
           actimax_loss_print = []
@@ -214,20 +213,21 @@ if __name__ == "__main__":
             feats = ae.be.forward_branch(imgrec)
             logits = feats[-1]; last_feature = feats[-2]
             logits_all.append(logits.detach())
-            label = logits.argmax(dim=1)
+            label = logits.argmax(dim=1).detach()
             
             ## Low-level natural image prior: tv + image norm
             # ref: 2015 CVPR Understanding Deep Image Representations by Inverting Them
-            tvloss = args.lw_tv * (torch.sum(torch.abs(imgrec[:, :, :, :-1] - imgrec[:, :, :, 1:])) + 
-                                   torch.sum(torch.abs(imgrec[:, :, :-1, :] - imgrec[:, :, 1:, :])))
-            # total_loss_dec += tvloss
-            imgnorm = torch.pow(torch.norm(imgrec, p=6), 6) * args.lw_norm
-            # total_loss_dec += imgnorm
+            tvloss = (torch.sum(torch.abs(imgrec[:, :, :, :-1] - imgrec[:, :, :, 1:])) + 
+                      torch.sum(torch.abs(imgrec[:, :, :-1, :] - imgrec[:, :, 1:, :])))
+            if args.lw_tv: total_loss_dec += tvloss * args.lw_tv
+            imgnorm = torch.pow(torch.norm(imgrec, p=6), 6)
+            if args.lw_norm: total_loss_dec += imgnorm * args.lw_norm
             
-            ## Classification loss, the bottomline loss
-            hardloss = nn.CrossEntropyLoss()(logits, label) * args.lw_hard
+            ## Classification loss, or hard-target loss in KD
+            hardloss = torch.zeros(1)
+            hardloss = nn.CrossEntropyLoss()(logits, label)
             hardloss_dec_all.append(hardloss.item())
-            total_loss_dec += hardloss
+            if args.lw_hard: total_loss_dec += hardloss * args.lw_hard
             # for accuracy print
             pred = logits.detach().max(1)[1]
             trainacc = pred.eq(label.view_as(pred)).sum().item() / label.size(0)
@@ -249,24 +249,24 @@ if __name__ == "__main__":
             
             ## Activation maximization loss
             # ref: 2016 IJCV Visualizing Deep Convolutional Neural Networks Using Natural Pre-images
+            actimax_loss = torch.zeros(1)
             if args.clip_actimax and epoch >= 7:
               args.lw_actimax = 0
             if args.lw_actimax:
               rand_loss_weight = torch.rand_like(logits) * args.noise_magnitude
               for i in range(logits.size(0)):
                 rand_loss_weight[i, label[i]] = 1
-              actimax_loss = -args.lw_actimax * (torch.dot(logits.flatten(), rand_loss_weight.flatten()) / logits.size(0))
+              actimax_loss = -torch.dot(logits.flatten(), rand_loss_weight.flatten()) / logits.size(0)
               actimax_loss_print.append(actimax_loss.item())
-              total_loss_dec += actimax_loss
+              total_loss_dec += actimax_loss * args.lw_actimax 
             
             ## Huawei's idea
-            if args.lw_feat_L1_norm:
-              L_alpha = -torch.norm(last_feature, p=1) / last_feature.size(0) * args.lw_feat_L1_norm
-              total_loss_dec += L_alpha 
-            if args.lw_class_balance:
-              pred_prob = logits.softmax(dim=1).mean(dim=0)
-              L_ie = torch.dot(pred_prob, torch.log(pred_prob)) / args.num_class * args.lw_class_balance
-              total_loss_dec += L_ie 
+            L_alpha = -torch.norm(last_feature, p=1) / last_feature.size(0)
+            if args.lw_feat_L1_norm: total_loss_dec += L_alpha * args.lw_feat_L1_norm
+            
+            pred_prob = logits.softmax(dim=1).mean(dim=0)
+            L_ie = torch.dot(pred_prob, torch.log(pred_prob)) / args.num_class
+            if args.lw_class_balance: total_loss_dec += L_ie * args.lw_class_balance
             
           dec.zero_grad()
           total_loss_dec.backward()
@@ -288,10 +288,11 @@ if __name__ == "__main__":
       else:
         imgrec = torch.randn_like(img).cuda()
         imgrec_all.append(imgrec)
-        logits = ae.be(imgrec)
+        feats = ae.be.forward_branch(imgrec)
+        logits = feats[-1]; last_feature = feats[-2]
         logits_all.append(logits)
-        label = logits.argmax(dim=1)
-        hardloss = nn.CrossEntropyLoss()(logits, label) * args.lw_hard
+        label = logits.argmax(dim=1).detach()
+        hardloss = nn.CrossEntropyLoss()(logits, label)
         hardloss_dec_all.append(hardloss.item())
         # for accuracy print
         pred = logits.detach().max(1)[1]
@@ -299,35 +300,40 @@ if __name__ == "__main__":
         trainacc_dec_all.append(trainacc)
         
         ## To maintain the normal log print
-        tvloss  = torch.zeros(1)
-        imgnorm = torch.zeros(1)
-        L_alpha = torch.zeros(1)
-        L_ie    = torch.zeros(1)
+        tvloss = (torch.sum(torch.abs(imgrec[:, :, :, :-1] - imgrec[:, :, :, 1:])) + 
+                  torch.sum(torch.abs(imgrec[:, :, :-1, :] - imgrec[:, :, 1:, :])))
+        imgnorm = torch.pow(torch.norm(imgrec, p=6), 6)
+        L_alpha = -torch.norm(last_feature, p=1) / last_feature.size(0)
+        pred_prob = logits.softmax(dim=1).mean(dim=0)
+        L_ie = torch.dot(pred_prob, torch.log(pred_prob)) / args.num_class
         
+
       # Update SE
-      hardloss_se_all = []; trainacc_se_all = []
+      hardloss_se_all = []; trainacc_se_all = []; softloss_se_all = []
       for sei in range(1, args.num_se + 1):
         se = eval("ae.se" + str(sei)); optimizer = optimizer_se[sei-1]; ema = ema_se[sei-1]
         loss_se = 0
         for i in range(len(imgrec_all)):
           logits = se(imgrec_all[i].detach())
-          hardloss = nn.CrossEntropyLoss()(logits, label) * args.lw_hard
-          loss_se += hardloss # Huawei's paper does not mention using this hard loss for SE
+          hardloss = nn.CrossEntropyLoss()(logits, label)
+          if args.lw_hard: loss_se += hardloss * args.lw_hard # Huawei's paper does not mention using this hard loss for SE
           hardloss_se_all.append(hardloss.item())
+          # for accuracy print
+          pred = logits.detach().max(1)[1]
+          trainacc = pred.eq(label.view_as(pred)).sum().item() / label.size(0)
+          trainacc_se_all.append(trainacc)
           
           # knowledge distillation loss
           # ref: https://github.com/peterliht/knowledge-distillation-pytorch/blob/master/model/net.py
-          kd_loss = nn.KLDivLoss()(F.log_softmax(logits/args.temp, dim=1),
-                        F.softmax(logits_all[i]/args.temp, dim=1)) * (args.temp * args.temp) * args.lw_soft
-          loss_se += kd_loss
-          
+          softloss = nn.KLDivLoss()(F.log_softmax(logits/args.temp, dim=1),
+                          F.softmax(logits_all[i]/args.temp, dim=1)) * (args.temp * args.temp)
+          if args.lw_soft: loss_se += softloss * args.lw_soft
+          softloss_se_all.append(softloss.item())
+
           if args.lw_DT:
             logits_DT = se(imgrec_DT_all[i].detach())
-            hardloss_DT = nn.CrossEntropyLoss()(logits_DT, label) * args.lw_DT
-            loss_se += hardloss_DT
-          
-          pred = logits.detach().max(1)[1]; trainacc = pred.eq(label.view_as(pred)).sum().item() / label.size(0)
-          trainacc_se_all.append(trainacc)
+            loss_se += nn.CrossEntropyLoss()(logits_DT, label) * args.lw_DT
+
         se.zero_grad()
         loss_se.backward()
         optimizer.step()
@@ -376,19 +382,19 @@ if __name__ == "__main__":
       if step % args.show_interval == 0:
         format_str1 = "E{:0>%s}S{:0>%s}" % (num_digit_show_epoch, num_digit_show_step)
         format_str2 = " | dec:" + " {:.3f}({:.3f})" * args.num_dec * args.num_divbranch
-        format_str3 = " | (se:" + " {:.3f}({:.3f}))" * args.num_dec * args.num_divbranch 
-        format_str4 = " | (tv: {:.3f} norm: {:.3f}) L_alpha: {:.3f} L_ie: {:.3f} kd_se: {:.3f}"
+        format_str3 = " | se:" + " {:.3f}({:.3f}) {:.3f}" * args.num_dec * args.num_divbranch 
+        format_str4 = " | tv: {:.3f} norm: {:.3f} L_alpha: {:.3f} L_ie: {:.3f}"
         format_str5 = " ({:.3f}s/step)"
         format_str = "".join([format_str1, format_str2, format_str3, format_str4, format_str5])
         strvalue2 = []; strvalue3 = []
         for i in range(args.num_dec * args.num_divbranch):
           strvalue2.append(hardloss_dec_all[i]); strvalue2.append(trainacc_dec_all[i])
-          strvalue3.append(hardloss_se_all[i]); strvalue3.append(trainacc_se_all[i])
+          strvalue3.append(hardloss_se_all[i]); strvalue3.append(trainacc_se_all[i]); strvalue3.append(softloss_se_all[i])
         logprint(format_str.format(
             epoch, step,
             *strvalue2,
             *strvalue3,
-            tvloss.item(), imgnorm.item(), L_alpha.item(), L_ie.item(), kd_loss.item(),
+            tvloss.item(), imgnorm.item(), L_alpha.item(), L_ie.item(),
             (time.time() - t1) / args.show_interval))
 
         t1 = time.time()
