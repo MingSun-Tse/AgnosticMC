@@ -9,7 +9,7 @@ class LogPrint():
   def __init__(self, file):
     self.file = file
   def __call__(self, some_str):
-    print(time.strftime("[%Y/%m/%d-%H:%M] ") + str(some_str), file=self.file, flush=True)
+    print("[%s-" % os.getpid() + time.strftime("%Y/%m/%d-%H:%M:%S] ") + str(some_str), file=self.file, flush=True)
   
 def check_path(x):
   if x:

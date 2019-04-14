@@ -103,7 +103,6 @@ args.e1 = check_path(args.e1)
 args.e2 = check_path(args.e2)
 args.pretrained_dir = check_path(args.pretrained_dir)
 args.adv_train = int(args.mode[-1])
-args.pid = os.getpid()
 num_channel = 1 if args.dataset == "MNIST" else 3
 
 # Set up directories and logs, etc.
