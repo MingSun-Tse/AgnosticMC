@@ -31,7 +31,7 @@ def get_previous_step(e2, resume):
   return previous_epoch, previous_step
   
 def set_up_dir(project_name, resume, CodeID):
-  TimeID = time.strftime("%Y%m%d-%H%M")
+  TimeID = time.strftime("%Y%m%d-%H%M%S")
   ExpID = "SERVER" + os.environ["SERVER"] + "-" + TimeID
   project_path = pjoin("../Experiments", ExpID + "_" + project_name)
   rec_img_path = pjoin(project_path, "reconstructed_images")
