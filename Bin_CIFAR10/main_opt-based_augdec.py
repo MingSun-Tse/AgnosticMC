@@ -173,7 +173,8 @@ if __name__ == "__main__":
     for step, (img, label) in enumerate(train_loader):
       ae.train()
       imgrec_all = []; logits_all = []; imgrec_DT_all = []; hardloss_dec_all = []; trainacc_dec_all = []
-      
+      actimax_loss_print = []
+
       if not args.use_random_input:
         # Generate codes randomly
         if args.lw_msgan:
@@ -206,7 +207,6 @@ if __name__ == "__main__":
             total_loss_dec += -args.lw_msgan * lz_pixel
           
           imgrecs_split = torch.split(imgrecs, num_channel, dim=1)
-          actimax_loss_print = []
           for imgrec in imgrecs_split:
             # forward
             imgrec_all.append(imgrec.detach()) # for SE

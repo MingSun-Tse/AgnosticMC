@@ -536,12 +536,20 @@ class DLeNet5_upsample(nn.Module):
     self.fc3 = nn.Linear(120, 400)
     self.conv2 = nn.Conv2d(16, 6, kernel_size=(5, 5), stride=(1, 1), padding=(2, 2)) # to maintain the spatial size, so padding=2
     self.conv1 = nn.Conv2d( 6, 1, kernel_size=(5, 5), stride=(1, 1), padding=(2, 2))
+    self.bn2 = nn.BatchNorm2d(6, 0.8)
+    self.bn1 = nn.BatchNorm2d(1, 0.8)
     
     self.relu = nn.ReLU(inplace=True)
     self.sigm = nn.Sigmoid()
+    self.tanh = nn.Tanh()
+    self.relu5 = nn.LeakyReLU(0.2, inplace=True)
+    self.relu4 = nn.LeakyReLU(0.2, inplace=True)
+    self.relu3 = nn.LeakyReLU(0.2, inplace=True)
+    self.relu2 = nn.LeakyReLU(0.2, inplace=True)
+    self.relu2 = nn.LeakyReLU(0.2, inplace=True)
     self.unpool = nn.UpsamplingNearest2d(scale_factor=2)
     self.pad = nn.ReflectionPad2d((2,2,2,2))
-    
+
     if model:
       self.load_state_dict(torch.load(model))
     if fixed:
@@ -549,16 +557,16 @@ class DLeNet5_upsample(nn.Module):
           param.requires_grad = False
       
   def forward(self, y):          # input: 10
-    y = self.relu(self.fc5(y))   # 84
-    y = self.relu(self.fc4(y))   # 120
-    y = self.relu(self.fc3(y))   # 400
+    y = self.relu5(self.fc5(y))   # 84
+    y = self.relu4(self.fc4(y))   # 120
+    y = self.relu3(self.fc3(y))   # 400
     y = y.view(-1, 16, 5, 5)     # 16x5x5
     y = self.unpool(y)           # 16x10x10
     y = self.pad(y)              # 16x14x14
-    y = self.relu(self.conv2(y)) # 6x14x14
+    y = self.relu2(self.bn2(self.conv2(y))) # 6x14x14
     y = self.unpool(y)           # 6x28x28
     y = self.pad(y)              # 6x32x32
-    y = self.relu(self.conv1(y)) # 1x32x32
+    y = self.tanh(self.bn1(self.conv1(y))) # 1x32x32
     return y
     
 # Use the LeNet model as https://github.com/iRapha/replayed_distillation/blob/master/models/lenet.py
