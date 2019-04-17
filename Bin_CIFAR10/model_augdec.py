@@ -794,7 +794,7 @@ class AutoEncoder_GAN4(nn.Module):
         pretrained_model = [x for x in os.listdir(args.pretrained_dir) if "_d%s_" % di in x and args.pretrained_timeid in x] # the number of pretrained decoder should be like "SERVER218-20190313-1233_d3_E0S0.pth"
         assert(len(pretrained_model) == 1)
         pretrained_model = pretrained_model[0]
-      input_dim = args.num_z # + args.num_class # There is only random noise as input in Huawei's idea
+      input_dim = args.num_z + args.num_class if args.use_condition else args.num_z
       self.__setattr__("d" + str(di), Dec(input_dim, pretrained_model, fixed=False, gray=args.gray, num_divbranch=args.num_divbranch))
       self.mask = MaskNet(input_dim)
       self.meta = MetaNet(input_dim)

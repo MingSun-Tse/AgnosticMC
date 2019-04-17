@@ -86,6 +86,7 @@ parser.add_argument('--noise_magnitude', type=float, default=0)
 parser.add_argument('--CodeID', type=str)
 parser.add_argument('--clip_actimax', action="store_true")
 parser.add_argument('--dataset', type=str, default="MNIST")
+parser.add_argument('--use_condition', action="store_true")
 args = parser.parse_args()
 
 # Update and check args
@@ -166,6 +167,7 @@ if __name__ == "__main__":
   previous_epoch, previous_step = get_previous_step(args.e2, args.resume)
   
   # Optimization
+  one_hot = OneHotCategorical(torch.Tensor([1. / args.num_class] * args.num_class))
   num_digit_show_step  = len(str(int(num_train / args.batch_size)))
   num_digit_show_epoch = len(str(args.num_epoch))
   t1 = time.time()
@@ -178,11 +180,21 @@ if __name__ == "__main__":
       if not args.use_random_input:
         # Generate codes randomly
         if args.lw_msgan:
-          random_z1 = torch.cuda.FloatTensor(int(args.batch_size/2), args.num_z); random_z1.copy_(torch.randn(int(args.batch_size/2), args.num_z))
-          random_z2 = torch.cuda.FloatTensor(int(args.batch_size/2), args.num_z); random_z2.copy_(torch.randn(int(args.batch_size/2), args.num_z))
+          half_bs = int(args.batch_size / 2)
+          random_z1 = torch.cuda.FloatTensor(half_bs, args.num_z); random_z1.copy_(torch.randn(half_bs, args.num_z))
+          random_z2 = torch.cuda.FloatTensor(half_bs, args.num_z); random_z2.copy_(torch.randn(half_bs, args.num_z))
           x = torch.cat([random_z1, random_z2], dim=0)
+          if args.use_condition:
+            onehot_label = one_hot.sample_n(half_bs).view([half_bs, args.num_class]).cuda()
+            label_concat = torch.cat([onehot_label, onehot_label], dim=0)
+            label = label_concat.argmax(dim=1).detach()
+            x = torch.cat([x, label_concat], dim=1).detach()
         else:
-          x = torch.cuda.FloatTensor(args.batch_size, args.num_z); random_z1.copy_(torch.randn(args.batch_size, args.num_z))
+          x = torch.cuda.FloatTensor(args.batch_size, args.num_z); x.copy_(torch.randn(args.batch_size, args.num_z))
+          if args.use_condition:
+            onehot_label = one_hot.sample_n(args.batch_size).view([args.batch_size, args.num_class]).cuda()
+            label = onehot_label.argmax(dim=1).detach()
+            x = torch.cat([x, onehot_label], dim=1).detach()
         
         # Update decoder
         for di in range(1, args.num_dec + 1):
@@ -197,10 +209,10 @@ if __name__ == "__main__":
           # ref: 2019 CVPR Mode Seeking Generative Adversarial Networks for Diverse Image Synthesis
           if args.lw_msgan:
             if args.msgan_option == "pixel":
-              imgrecs_1, imgrecs_2 = torch.split(imgrecs, int(args.batch_size/2), dim=0)
+              imgrecs_1, imgrecs_2 = torch.split(imgrecs, half_bs, dim=0)
               lz_pixel = torch.mean(torch.abs(imgrecs_1 - imgrecs_2)) / torch.mean(torch.abs(random_z1 - random_z2))
             elif args.msgan_option == "pixelgray": # deprecated
-              imgrecs_1, imgrecs_2 = torch.split(imgrecs, int(args.batch_size/2), dim=0)
+              imgrecs_1, imgrecs_2 = torch.split(imgrecs, half_bs, dim=0)
               imgrecs_1 = imgrecs_1[:,0,:,:] * 0.299 + imgrecs_1[:,1,:,:] * 0.587 + imgrecs_1[:,2,:,:] * 0.114 # the Y channel (Luminance) of an image
               imgrecs_2 = imgrecs_2[:,0,:,:] * 0.299 + imgrecs_2[:,1,:,:] * 0.587 + imgrecs_2[:,2,:,:] * 0.114
               lz_pixel = torch.mean(torch.abs(imgrecs_1 - imgrecs_2)) / torch.mean(torch.abs(random_z1 - random_z2))
@@ -213,7 +225,8 @@ if __name__ == "__main__":
             feats = ae.be.forward_branch(imgrec)
             logits = feats[-1]; last_feature = feats[-2]
             logits_all.append(logits.detach())
-            label = logits.argmax(dim=1).detach()
+            if not args.use_condition:
+              label = logits.argmax(dim=1).detach()
             
             ## Low-level natural image prior: tv + image norm
             # ref: 2015 CVPR Understanding Deep Image Representations by Inverting Them
@@ -260,7 +273,8 @@ if __name__ == "__main__":
               actimax_loss_print.append(actimax_loss.item())
               total_loss_dec += actimax_loss * args.lw_actimax 
             
-            ## Huawei's idea
+            ## DFL
+            # ref: 2019.04 arxiv Data-Free Learning of Student Networks (https://arxiv.org/abs/1904.01186)
             L_alpha = -torch.norm(last_feature, p=1) / last_feature.size(0)
             if args.lw_feat_L1_norm: total_loss_dec += L_alpha * args.lw_feat_L1_norm
             
@@ -348,6 +362,8 @@ if __name__ == "__main__":
         logprint(("E{:0>%s}S{:0>%s} | Saving image samples" % (num_digit_show_epoch, num_digit_show_step)).format(epoch, step))
         onehot_label = torch.eye(args.num_class)
         test_codes = torch.randn([args.num_class, args.num_z])
+        if args.use_condition:
+          test_codes = torch.cat([test_codes, onehot_label], dim=1)
         for i in range(len(test_codes)):
           x = test_codes[i].cuda().unsqueeze(0)
           for di in range(1, args.num_dec + 1):
@@ -357,7 +373,7 @@ if __name__ == "__main__":
             for bi in range(len(imgs)):
               img1 = imgs[bi]
               logits = ae.be(img1)[0]
-              test_label = logits.argmax().item()
+              test_label = i if args.use_condition else logits.argmax().item()
               out_img1_path = pjoin(rec_img_path, "%s_E%sS%s_d%s_b%s_imgrec%s_label%s.jpg" % (ExpID, epoch, step, di, bi, i, test_label))
               vutils.save_image(img1.data.cpu().float(), out_img1_path)
 
