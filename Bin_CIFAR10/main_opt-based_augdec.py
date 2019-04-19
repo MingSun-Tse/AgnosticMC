@@ -271,19 +271,12 @@ if __name__ == "__main__":
             if args.clip_actimax and epoch >= 7:
               args.lw_actimax = 0
             if args.lw_actimax:
-              if args.use_condition:
-                prob = logits.softmax(dim=1)
-                true_prob = torch.zeros_like(prob); true_prob.copy_(prob * 0.1)
-                for i in range(logits.size(0)):
-                  true_prob[i, label[i]] = 1
-                rand_loss_weight = true_prob.detach()
-              else:
-                rand_loss_weight = torch.rand_like(logits) * args.noise_magnitude
-                for i in range(logits.size(0)):
-                  rand_loss_weight[i, label[i]] = 1
-              actimax_loss = torch.dot(logits.flatten(), rand_loss_weight.flatten()) / logits.size(0)
+              rand_loss_weight = torch.rand_like(logits) * args.noise_magnitude
+              for i in range(logits.size(0)):
+                rand_loss_weight[i, label[i]] = 1
+              actimax_loss = -torch.dot(logits.flatten(), rand_loss_weight.flatten()) / logits.size(0)
               actimax_loss_print.append(actimax_loss.item())
-              total_loss_dec += args.lw_actimax / actimax_loss
+              total_loss_dec += actimax_loss * args.lw_actimax
             
             ## DFL
             # ref: 2019.04 arxiv Data-Free Learning of Student Networks (https://arxiv.org/abs/1904.01186)
