@@ -190,7 +190,8 @@ if __name__ == "__main__":
             # label_concat = torch.cat([onehot_label, onehot_label], dim=0)
             # label = label_concat.argmax(dim=1).detach()
             # x = torch.cat([x, label_concat], dim=1).detach()
-            label_noise = torch.rand(args.batch_size, args.num_class).cuda()
+            onehot_label = one_hot.sample_n(args.batch_size).cuda() * args.begin
+            label_noise = torch.rand(args.batch_size, args.num_class).cuda() + onehot_label
             label = label_noise.argmax(dim=1).detach()
             x = torch.cat([x, label_noise], dim=1).detach()
             
