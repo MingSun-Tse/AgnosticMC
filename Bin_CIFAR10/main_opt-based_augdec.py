@@ -63,6 +63,7 @@ parser.add_argument('--lw_msgan',  type=float, default=1e-30) # 100)
 parser.add_argument('--lw_maskdiversity',  type=float, default=0) # 100)
 parser.add_argument('--lw_feat_L1_norm', type=float, default=-0.1)
 parser.add_argument('--lw_class_balance', type=float, default=5)
+parser.add_argument('--lw_my_diversity', type=float, default=5)
 # ----------------------------------------------------------------
 parser.add_argument('-b', '--batch_size', type=int, default=600) # 256)
 parser.add_argument('-p', '--project_name', type=str, default="test")
@@ -266,22 +267,39 @@ if __name__ == "__main__":
             if args.clip_actimax and epoch >= 7:
               args.lw_actimax = 0
             if args.lw_actimax:
-              rand_loss_weight = torch.rand_like(logits) * args.noise_magnitude
-              for i in range(logits.size(0)):
-                rand_loss_weight[i, label[i]] = 1
-              actimax_loss = -torch.dot(logits.flatten(), rand_loss_weight.flatten()) / logits.size(0)
+              if args.use_condition:
+                prob = logits.softmax(dim=1)
+                true_prob = torch.zeros_like(prob); true_prob.copy_(prob * 0.1)
+                for i in range(logits.size(0)):
+                  true_prob[i, label[i]] = 1
+                rand_loss_weight = true_prob.detach()
+              else:
+                rand_loss_weight = torch.rand_like(logits) * args.noise_magnitude
+                for i in range(logits.size(0)):
+                  rand_loss_weight[i, label[i]] = 1
+              actimax_loss = torch.dot(logits.flatten(), rand_loss_weight.flatten()) / logits.size(0)
               actimax_loss_print.append(actimax_loss.item())
-              total_loss_dec += actimax_loss * args.lw_actimax 
+              total_loss_dec += args.lw_actimax / actimax_loss
             
             ## DFL
             # ref: 2019.04 arxiv Data-Free Learning of Student Networks (https://arxiv.org/abs/1904.01186)
             L_alpha = -torch.norm(last_feature, p=1) / last_feature.size(0)
             if args.lw_feat_L1_norm: total_loss_dec += L_alpha * args.lw_feat_L1_norm
             
-            pred_prob = logits.softmax(dim=1).mean(dim=0)
-            L_ie = torch.dot(pred_prob, torch.log(pred_prob)) / args.num_class
+            prob = logits.softmax(dim=1)
+            ave_prob = prob.mean(dim=0)
+            L_ie = torch.dot(ave_prob, torch.log(ave_prob)) / args.num_class
             if args.lw_class_balance: total_loss_dec += L_ie * args.lw_class_balance
             
+            ## My diversity loss
+            # pred_label = logits.argmax(dim=1)
+            # true_prob = torch.zeros_like(prob); true_prob.copy_(prob)
+            # for i in range(logits.size(0)):
+              # true_prob[i, label[i]] = prob[i, pred_label[i]]
+              # true_prob[i, pred_label[i]] = prob[i, label[i]]
+            # loss_KL = nn.KLDivLoss()(F.log_softmax(logits, dim=1), true_prob.detach())
+            # if args.lw_my_diversity: total_loss_dec += loss_KL * args.lw_my_diversity
+
           dec.zero_grad()
           total_loss_dec.backward()
           optimizer_d.step()
