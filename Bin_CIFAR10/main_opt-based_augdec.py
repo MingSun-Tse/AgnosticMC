@@ -190,11 +190,9 @@ if __name__ == "__main__":
             # label_concat = torch.cat([onehot_label, onehot_label], dim=0)
             # label = label_concat.argmax(dim=1).detach()
             # x = torch.cat([x, label_concat], dim=1).detach()
-            onehot_label = one_hot.sample_n(args.batch_size).cuda() * args.begin
-            label_noise = torch.randn(args.batch_size, args.num_class).cuda() + onehot_label
+            label_noise = torch.randn(args.batch_size, args.num_class).cuda() * args.begin
             label = label_noise.argmax(dim=1).detach()
             x = torch.cat([x, label_noise], dim=1).detach()
-            
         else:
           x = torch.cuda.FloatTensor(args.batch_size, args.num_z); x.copy_(torch.randn(args.batch_size, args.num_z))
           if args.use_condition:
