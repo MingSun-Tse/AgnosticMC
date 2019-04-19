@@ -186,10 +186,14 @@ if __name__ == "__main__":
           random_z2 = torch.cuda.FloatTensor(half_bs, args.num_z); random_z2.copy_(torch.randn(half_bs, args.num_z))
           x = torch.cat([random_z1, random_z2], dim=0)
           if args.use_condition:
-            onehot_label = one_hot.sample_n(half_bs).view([half_bs, args.num_class]).cuda()
-            label_concat = torch.cat([onehot_label, onehot_label], dim=0)
-            label = label_concat.argmax(dim=1).detach()
-            x = torch.cat([x, label_concat], dim=1).detach()
+            # onehot_label = one_hot.sample_n(half_bs).view([half_bs, args.num_class]).cuda()
+            # label_concat = torch.cat([onehot_label, onehot_label], dim=0)
+            # label = label_concat.argmax(dim=1).detach()
+            # x = torch.cat([x, label_concat], dim=1).detach()
+            label_noise = torch.rand(args.batch_size, args.num_class).cuda()
+            label = label_noise.argmax(dim=1).detach()
+            x = torch.cat([x, label_noise], dim=1).detach()
+            
         else:
           x = torch.cuda.FloatTensor(args.batch_size, args.num_z); x.copy_(torch.randn(args.batch_size, args.num_z))
           if args.use_condition:
