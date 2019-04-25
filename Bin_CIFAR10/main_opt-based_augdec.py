@@ -203,7 +203,7 @@ if __name__ == "__main__":
         # Update decoder
         for di in range(1, args.num_dec + 1):
           # Set up model and ema
-          dec = eval("ae.d" + str(di)); optimizer_d = optimizer_dec[di-1]; ema_d = ema_dec[di-1]
+          dec = eval("ae.d" + str(di)); optimizer_d = optimizer_dec[di - 1]; ema_d = ema_dec[di - 1]
           total_loss_dec = 0
 
           # Forward
@@ -241,7 +241,6 @@ if __name__ == "__main__":
             if args.lw_norm: total_loss_dec += imgnorm * args.lw_norm
             
             ## Classification loss, or hard-target loss in KD
-            hardloss = torch.zeros(1)
             hardloss = nn.CrossEntropyLoss()(logits, label)
             hardloss_dec_all.append(hardloss.item())
             if args.lw_hard_dec: total_loss_dec += hardloss * args.lw_hard_dec
@@ -334,12 +333,11 @@ if __name__ == "__main__":
         L_alpha = -torch.norm(last_feature, p=1) / last_feature.size(0)
         pred_prob = logits.softmax(dim=1).mean(dim=0)
         L_ie = torch.dot(pred_prob, torch.log(pred_prob)) / args.num_class
-        
 
       # Update SE
       hardloss_se_all = []; trainacc_se_all = []; softloss_se_all = []
       for sei in range(1, args.num_se + 1):
-        se = eval("ae.se" + str(sei)); optimizer = optimizer_se[sei-1]; ema = ema_se[sei-1]
+        se = eval("ae.se" + str(sei)); optimizer = optimizer_se[sei - 1]; ema = ema_se[sei - 1]
         loss_se = 0
         for i in range(len(imgrec_all)):
           logits = se(imgrec_all[i])
@@ -374,23 +372,41 @@ if __name__ == "__main__":
         ae.eval()
         # save some test images
         logprint(("E{:0>%s}S{:0>%s} | Saving image samples" % (num_digit_show_epoch, num_digit_show_step)).format(epoch, step))
-        onehot_label = torch.eye(args.num_class)
-        test_codes = torch.randn([args.num_class, args.num_z])
         if args.use_condition:
+          test_codes = torch.randn([args.num_class, args.num_z])
+          onehot_label = torch.eye(args.num_class)
           test_codes = torch.cat([test_codes, onehot_label], dim=1)
-        for i in range(len(test_codes)):
-          x = test_codes[i].cuda().unsqueeze(0)
-          for di in range(1, args.num_dec + 1):
-            dec = eval("ae.d%s" % di)
-            imgrecs = dec(x)
-            imgs = torch.split(imgrecs, num_channel, dim=1)
-            for bi in range(len(imgs)):
-              img1 = imgs[bi]
-              logits = ae.be(img1)[0]
-              test_label = i if args.use_condition else logits.argmax().item()
-              out_img1_path = pjoin(rec_img_path, "%s_E%sS%s_d%s_b%s_imgrec%s_label%s.jpg" % (ExpID, epoch, step, di, bi, i, test_label))
-              vutils.save_image(img1.data.cpu().float(), out_img1_path)
-
+          for i in range(len(test_codes)):
+            x = test_codes[i].cuda().unsqueeze(0)
+            test_label = i
+            for di in range(1, args.num_dec + 1):
+              dec = eval("ae.d%s" % di)
+              imgrecs = dec(x)
+              imgs = torch.split(imgrecs, num_channel, dim=1)
+              for bi in range(len(imgs)):
+                img1 = imgs[bi]
+                out_img1_path = pjoin(rec_img_path, "%s_E%sS%s_d%s_b%s_imgrec%s_label%s.jpg" % (ExpID, epoch, step, di, bi, i, test_label))
+                vutils.save_image(img1.data.cpu().float(), out_img1_path)
+        else:
+          sign = torch.zeros(args.num_class)
+          while sign.sum() != args.num_class:
+            x = torch.rand(args.num_class * 5, args.num_z).cuda()
+            imgs = ae.d1(x) # TODO: not use multi-decoders and multi-branches for now. Will add these features in the future
+            logits = ae.be(imgs)
+            test_lables = logits.argmax(dim=1)
+            for i in range(len(imgs)):
+              img1 = imgs[i]
+              test_label = test_lables[i].item()
+              # if epoch < 10 and i < args.num_class:
+              if i < args.num_class:
+                out_img1_path = pjoin(rec_img_path, "%s_E%sS%s_d1_b1_imgrec%s_label%s.jpg" % (ExpID, epoch, step, i, test_label))
+                vutils.save_image(img1.data.cpu().float(), out_img1_path)
+                sign[i] = 1
+              # elif sign[test_label] == 0:
+                # out_img1_path = pjoin(rec_img_path, "%s_E%sS%s_d1_b1_label%s.jpg" % (ExpID, epoch, step, test_label))
+                # vutils.save_image(img1.data.cpu().float(), out_img1_path)
+                # sign[test_label] = 1
+                
       # Test and save models
       if step % args.test_interval == 0:
         ae.eval()

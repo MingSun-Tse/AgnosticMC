@@ -298,6 +298,34 @@ class DVGG19(nn.Module):
     x = self.features(x)
     x = torch.stack([x]*3, dim=1).squeeze(2) if self.gray else x
     return x
+
+# mimic the net architecture of MNIST deconv
+class DVGG19_deconv(nn.Module):
+  def __init__(self, input_dim, model=None, fixed=False, gray=False, num_divbranch=1):
+    super(DVGG19_deconv, self).__init__()
+    img_size = 32
+    num_channel = 3
+    self.init_size = img_size // 4
+    self.l1 = nn.Sequential(nn.Linear(input_dim, 128 * self.init_size ** 2))
+    self.conv_blocks = nn.Sequential(
+        nn.BatchNorm2d(128),
+        nn.Upsample(scale_factor=2),
+        nn.Conv2d(128, 128, 3, stride=1, padding=1),
+        nn.BatchNorm2d(128, 0.8),
+        nn.LeakyReLU(0.2, inplace=True),
+        nn.Upsample(scale_factor=2),
+        nn.Conv2d(128, 64, 3, stride=1, padding=1),
+        nn.BatchNorm2d(64, 0.8),
+        nn.LeakyReLU(0.2, inplace=True),
+        nn.Conv2d(64, num_channel, 3, stride=1, padding=1),
+        nn.BatchNorm2d(num_channel, 0.8), # Ref: Huawei's paper. They add a BN layer at the end of the generator.
+        nn.Tanh(),
+    )
+  def forward(self, z):
+      out = self.l1(z)
+      out = out.view(out.shape[0], 128, self.init_size, self.init_size)
+      img = self.conv_blocks(out)
+      return img
     
 class DVGG19_aug(nn.Module): # augmented DVGG19
   def __init__(self, input_dim, model=None, fixed=None, gray=False, num_divbranch=1):
@@ -353,6 +381,7 @@ class DVGG19_aug(nn.Module): # augmented DVGG19
     y.append(x)
     return y
     
+# deprecated
 class DVGG19_meta(nn.Module):
   def __init__(self, input_dim, model=None, fixed=None, gray=False, num_divbranch=1):
     super(DVGG19_meta, self).__init__()
@@ -385,7 +414,8 @@ class DVGG19_meta(nn.Module):
     x = x.view(x.size(0), 512, 1, 1)
     x = self.features(x)
     return x
-        
+
+# deprecated
 class MaskNet(nn.Module):
   def __init__(self, input_dim, model=None, fixed=None, gray=False, num_divbranch=1):
     super(MaskNet, self).__init__()
@@ -417,6 +447,7 @@ class MaskNet(nn.Module):
     x = self.features(x)
     return x
 
+# deprecated
 class MetaNet(nn.Module):
   def __init__(self, input_dim, model=None, fixed=None, gray=False, num_divbranch=1):
     super(MetaNet, self).__init__()
@@ -456,47 +487,47 @@ class MetaNet(nn.Module):
     y4 = self.tanh(self.conv4(x)) # batch x   48 x 3 x 3
     return [y1, y2, y3, y4]
 
-class DVGG19_deconv(nn.Module):
-  def __init__(self, input_dim, model=None, fixed=None, gray=False, d=128):
-    super(DVGG19_deconv, self).__init__()
-    self.deconv1 = nn.ConvTranspose2d(input_dim, d*4, 4, 1, 0)
-    self.deconv1_bn = nn.BatchNorm2d(d*4)
-    self.relu1 = nn.ReLU(True)
-    self.deconv2 = nn.ConvTranspose2d(d*4, d*2, 4, 2, 1)
-    self.deconv2_bn = nn.BatchNorm2d(d*2)
-    self.relu2 = nn.ReLU(True)
-    self.deconv3 = nn.ConvTranspose2d(d*2, d, 4, 2, 1)
-    self.deconv3_bn =nn.BatchNorm2d(d)
-    self.relu3 = nn.ReLU(True)
-    self.deconv4 = nn.ConvTranspose2d(d, 3, 4, 2, 1)
-    self.tanh = nn.Tanh()
-    self.sigm = nn.Sigmoid()
+# class DVGG19_deconv(nn.Module):
+  # def __init__(self, input_dim, model=None, fixed=None, gray=False, d=128):
+    # super(DVGG19_deconv, self).__init__()
+    # self.deconv1 = nn.ConvTranspose2d(input_dim, d*4, 4, 1, 0)
+    # self.deconv1_bn = nn.BatchNorm2d(d*4)
+    # self.relu1 = nn.ReLU(True)
+    # self.deconv2 = nn.ConvTranspose2d(d*4, d*2, 4, 2, 1)
+    # self.deconv2_bn = nn.BatchNorm2d(d*2)
+    # self.relu2 = nn.ReLU(True)
+    # self.deconv3 = nn.ConvTranspose2d(d*2, d, 4, 2, 1)
+    # self.deconv3_bn =nn.BatchNorm2d(d)
+    # self.relu3 = nn.ReLU(True)
+    # self.deconv4 = nn.ConvTranspose2d(d, 3, 4, 2, 1)
+    # self.tanh = nn.Tanh()
+    # self.sigm = nn.Sigmoid()
     
-    # use upsampling for the last conv layer
-    self.upscale = nn.UpsamplingNearest2d(scale_factor=2)
-    self.conv4 = nn.Conv2d(d, 3, 3, 1, 1)
+    # # use upsampling for the last conv layer
+    # self.upscale = nn.UpsamplingNearest2d(scale_factor=2)
+    # self.conv4 = nn.Conv2d(d, 3, 3, 1, 1)
     
-    if model:
-     checkpoint = torch.load(model)
-     self.load_state_dict(checkpoint)
-    else:
-      for m in self.modules():
-        if isinstance(m, nn.Conv2d):
-          n = m.kernel_size[0] * m.kernel_size[1] * m.out_channels
-          m.weight.data.normal_(0, math.sqrt(2. / n))
-          m.bias.data.zero_()
+    # if model:
+     # checkpoint = torch.load(model)
+     # self.load_state_dict(checkpoint)
+    # else:
+      # for m in self.modules():
+        # if isinstance(m, nn.Conv2d):
+          # n = m.kernel_size[0] * m.kernel_size[1] * m.out_channels
+          # m.weight.data.normal_(0, math.sqrt(2. / n))
+          # m.bias.data.zero_()
 
-    if fixed:
-      for param in self.parameters():
-          param.requires_grad = False
+    # if fixed:
+      # for param in self.parameters():
+          # param.requires_grad = False
           
-  def forward(self, x):
-    x = x.view(x.size(0), x.size(1), 1, 1)           # batch x num_z+num_class x 1 x 1
-    x = self.relu1(self.deconv1_bn(self.deconv1(x))) # batch x 512 x 4 x 4
-    x = self.relu2(self.deconv2_bn(self.deconv2(x))) # batch x 256 x 8 x 8
-    x = self.relu3(self.deconv3_bn(self.deconv3(x))) # batch x 128 x 16 x 16
-    x = self.sigm(self.deconv4(x))                   # batch x 3 x 32 x 32
-    return x
+  # def forward(self, x):
+    # x = x.view(x.size(0), x.size(1), 1, 1)           # batch x num_z+num_class x 1 x 1
+    # x = self.relu1(self.deconv1_bn(self.deconv1(x))) # batch x 512 x 4 x 4
+    # x = self.relu2(self.deconv2_bn(self.deconv2(x))) # batch x 256 x 8 x 8
+    # x = self.relu3(self.deconv3_bn(self.deconv3(x))) # batch x 128 x 16 x 16
+    # x = self.sigm(self.deconv4(x))                   # batch x 3 x 32 x 32
+    # return x
 
 ################# MNIST #################
 # ref: https://github.com/eriklindernoren/PyTorch-GAN/blob/master/implementations/dcgan/dcgan.py
@@ -504,6 +535,7 @@ class DLeNet5_deconv(nn.Module):
   def __init__(self, input_dim, model=None, fixed=False, gray=False, num_divbranch=1):
     super(DLeNet5_deconv, self).__init__()
     img_size = 32
+    num_channel = 1
     self.init_size = img_size // 4
     self.l1 = nn.Sequential(nn.Linear(input_dim, 128 * self.init_size ** 2))
     self.conv_blocks = nn.Sequential(
@@ -516,8 +548,8 @@ class DLeNet5_deconv(nn.Module):
         nn.Conv2d(128, 64, 3, stride=1, padding=1),
         nn.BatchNorm2d(64, 0.8),
         nn.LeakyReLU(0.2, inplace=True),
-        nn.Conv2d(64, 1, 3, stride=1, padding=1),
-        nn.BatchNorm2d(1, 0.8), # Ref: Huawei's paper. They add a BN layer at the end of the generator.
+        nn.Conv2d(64, num_channel, 3, stride=1, padding=1),
+        nn.BatchNorm2d(num_channel, 0.8), # Ref: Huawei's paper. They add a BN layer at the end of the generator.
         nn.Tanh(),
     )
   def forward(self, z):
@@ -773,7 +805,7 @@ class AutoEncoder_GAN4(nn.Module):
   def __init__(self, args):
     super(AutoEncoder_GAN4, self).__init__()
     if args.dataset == "CIFAR10":
-      BE = VGG19; Dec = DVGG19_aug; SE = SmallVGG19
+      BE = VGG19; Dec = DVGG19_deconv; SE = SmallVGG19
       self.normalize = Normalize_CIFAR10()
     elif args.dataset == "MNIST":
       BE = LeNet5; Dec = DLeNet5_deconv; SE = SmallLeNet5
