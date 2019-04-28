@@ -374,11 +374,12 @@ if __name__ == "__main__":
         logprint(("E{:0>%s}S{:0>%s} | Saving image samples" % (num_digit_show_epoch, num_digit_show_step)).format(epoch, step))
         if args.use_condition:
           test_codes = torch.randn([args.num_class, args.num_z])
-          onehot_label = torch.eye(args.num_class)
-          test_codes = torch.cat([test_codes, onehot_label], dim=1)
+          label_noise = torch.randn([args.num_class, args.num_class])
+          test_codes = torch.cat([test_codes, label_noise], dim=1)
+          label = label_noise.argmax(dim=1)
           for i in range(len(test_codes)):
             x = test_codes[i].cuda().unsqueeze(0)
-            test_label = i
+            test_label = label[i].item()
             for di in range(1, args.num_dec + 1):
               dec = eval("ae.d%s" % di)
               imgrecs = dec(x)
