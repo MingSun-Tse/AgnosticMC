@@ -655,9 +655,9 @@ class LeNet5(nn.Module):
     y = self.fc5(y)
     return out2, y
 
-class LeNet5_deeper(nn.Module):
+class LeNet5_deep(nn.Module):
   def __init__(self, model=None, fixed=False):
-    super(LeNet5_deeper, self).__init__()
+    super(LeNet5_deep, self).__init__()
     self.fixed = fixed
     
     self.conv1  = nn.Conv2d( 1,  6, kernel_size=(5, 5), stride=(1, 1), padding=(0, 0))
@@ -693,7 +693,22 @@ class LeNet5_deeper(nn.Module):
     y = self.relu(self.fc4(y))   # 84
     y = self.fc5(y)              # 10
     return y
-
+    
+  def forward_branch(self, y):
+    y = self.relu(self.conv1(y)); out1 = y
+    y = self.pool1(y)
+    y = self.relu(self.conv11(y))
+    y = self.relu(self.conv12(y))
+    y = self.relu(self.conv13(y))
+    y = self.relu(self.conv14(y))
+    y = self.relu(self.conv2(y)); out2 = y
+    y = self.pool2(y)
+    y = y.view(y.size(0), -1)
+    y = self.relu(self.fc3(y)); out3 = y
+    y = self.relu(self.fc4(y)); out4 = y
+    y = self.fc5(y)
+    return out2, y
+    
 class SmallLeNet5(nn.Module):
   def __init__(self, model=None, fixed=False):
     super(SmallLeNet5, self).__init__()
@@ -736,9 +751,9 @@ class SmallLeNet5(nn.Module):
     y = self.fc5(y)
     return out1, out2, out3, out4, y    
 
-class SmallLeNet5_deeper(nn.Module):
+class SmallLeNet5_deep(nn.Module):
   def __init__(self, model=None, fixed=False):
-    super(SmallLeNet5_deeper, self).__init__()
+    super(SmallLeNet5_deep, self).__init__()
     self.fixed = fixed
     self.conv1  = nn.Conv2d(1, 3, kernel_size=(5, 5), stride=(1, 1), padding=(0, 0))
     self.pool1  = nn.MaxPool2d(kernel_size=2, stride=2, padding=0)
@@ -895,10 +910,10 @@ class AutoEncoder_GAN4(nn.Module):
       self.normalize = Normalize_CIFAR10()
     elif args.dataset == "MNIST":
       Dec = DLeNet5_deconv
-      if args.deeper_lenet5:
-        BE = LeNet5_deeper; SE = SmallLeNet5_deeper
-      else:
-        BE = LeNet5; SE = SmallLeNet5
+      mark_be = int(args.deep_lenet5[0]) * "_deep"
+      mark_se = int(args.deep_lenet5[1]) * "_deep"
+      BE = eval("LeNet5" + mark_be)
+      SE = eval("SmallLeNet5" + mark_se)
       self.normalize = Normalize_MNIST()
     
     self.be = BE(args.e1, fixed=True)

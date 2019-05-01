@@ -26,7 +26,7 @@ from torch.distributions.one_hot_categorical import OneHotCategorical
 import torchvision.datasets as datasets
 from torch.autograd import Variable
 # my libs
-from model_augdec import AutoEncoders, EMA, preprocess_image, recreate_image
+from model import AutoEncoders, EMA, preprocess_image, recreate_image
 from data import set_up_data
 from util import check_path, get_previous_step, LogPrint, set_up_dir
 
@@ -88,13 +88,13 @@ parser.add_argument('--CodeID', type=str)
 parser.add_argument('--clip_actimax', action="store_true")
 parser.add_argument('--dataset', type=str, default="MNIST")
 parser.add_argument('--use_condition', action="store_true")
-parser.add_argument('--deeper_lenet5', action="store_true")
+parser.add_argument('--deep_lenet5', type=str, default="00", help="11: deep teacher and deep student; 10: deep teacher and shallow student")
 args = parser.parse_args()
 
 # Update and check args
 pretrained_be_path = {
 "MNIST": "train_baseline_lenet5/trained_weights2/w*/*E17S0*.pth",
-"MNIST_deeper": "train_baseline_lenet5/trained_weights_deeper/w*/*E19S0*.pth",
+"MNIST_deep": "train_baseline_lenet5/trained_weights_deep/w*/*E19S0*.pth",
 "CIFAR10": "models/model_best.pth.tar",
 }
 
@@ -107,7 +107,7 @@ if args.e1 == None:
   if args.dataset == "CIFAR10":
     args.e1 = pretrained_be_path[args.dataset]
   else:
-    key = "MNIST_deeper" if args.deeper_lenet5 else "MNIST"
+    key = "MNIST" + "_deep" * int(args.deep_lenet5[0])
     args.e1 = pretrained_be_path[key]
 args.e1 = check_path(args.e1)
 args.e2 = check_path(args.e2)
