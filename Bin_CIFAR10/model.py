@@ -655,6 +655,60 @@ class LeNet5(nn.Module):
     y = self.fc5(y)
     return out2, y
 
+# class LeNet5_deep(nn.Module):
+  # def __init__(self, model=None, fixed=False):
+    # super(LeNet5_deep, self).__init__()
+    # self.fixed = fixed
+    
+    # self.conv1  = nn.Conv2d( 1,  6, kernel_size=(5, 5), stride=(1, 1), padding=(0, 0))
+    # self.pool1  = nn.MaxPool2d(kernel_size=2, stride=2, padding=0)
+    # self.conv11 = nn.Conv2d( 6,  8, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+    # self.conv12 = nn.Conv2d( 8, 10, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+    # self.conv13 = nn.Conv2d(10, 12, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+    # self.conv14 = nn.Conv2d(12, 14, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+    # self.conv2  = nn.Conv2d(14, 16, kernel_size=(5, 5), stride=(1, 1), padding=(0, 0))
+    # self.pool2  = nn.MaxPool2d(kernel_size=2, stride=2, padding=0)
+    # self.fc3 = nn.Linear(400, 120)
+    # self.fc4 = nn.Linear(120,  84)
+    # self.fc5 = nn.Linear( 84,  10)
+    # self.relu = nn.ReLU(inplace=True)
+    
+    # if model:
+      # self.load_state_dict(torch.load(model))
+    # if fixed:
+      # for param in self.parameters():
+        # param.requires_grad = False
+      
+  # def forward(self, y):          # input: 1x32x32
+    # y = self.relu(self.conv1(y)) # 6x28x28
+    # y = self.pool1(y)            # 6x14x14
+    # y = self.relu(self.conv11(y))
+    # y = self.relu(self.conv12(y))
+    # y = self.relu(self.conv13(y))
+    # y = self.relu(self.conv14(y))
+    # y = self.relu(self.conv2(y)) # 16x10x10
+    # y = self.pool2(y)            # 16x5x5
+    # y = y.view(y.size(0), -1)    # 400
+    # y = self.relu(self.fc3(y))   # 120
+    # y = self.relu(self.fc4(y))   # 84
+    # y = self.fc5(y)              # 10
+    # return y
+    
+  # def forward_branch(self, y):
+    # y = self.relu(self.conv1(y)); out1 = y
+    # y = self.pool1(y)
+    # y = self.relu(self.conv11(y))
+    # y = self.relu(self.conv12(y))
+    # y = self.relu(self.conv13(y))
+    # y = self.relu(self.conv14(y))
+    # y = self.relu(self.conv2(y)); out2 = y
+    # y = self.pool2(y)
+    # y = y.view(y.size(0), -1)
+    # y = self.relu(self.fc3(y)); out3 = y
+    # y = self.relu(self.fc4(y)); out4 = y
+    # y = self.fc5(y)
+    # return out2, y
+    
 class LeNet5_deep(nn.Module):
   def __init__(self, model=None, fixed=False):
     super(LeNet5_deep, self).__init__()
@@ -666,6 +720,15 @@ class LeNet5_deep(nn.Module):
     self.conv12 = nn.Conv2d( 8, 10, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
     self.conv13 = nn.Conv2d(10, 12, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
     self.conv14 = nn.Conv2d(12, 14, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+    self.conv15 = nn.Conv2d(14, 14, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+    self.conv16 = nn.Conv2d(14, 14, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+    self.conv17 = nn.Conv2d(14, 14, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+    self.conv18 = nn.Conv2d(14, 14, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+    self.conv19 = nn.Conv2d(14, 14, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+    self.conv110 = nn.Conv2d(14, 14, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+    self.conv111 = nn.Conv2d(14, 14, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+    self.conv112 = nn.Conv2d(14, 14, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+    self.conv113 = nn.Conv2d(14, 14, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
     self.conv2  = nn.Conv2d(14, 16, kernel_size=(5, 5), stride=(1, 1), padding=(0, 0))
     self.pool2  = nn.MaxPool2d(kernel_size=2, stride=2, padding=0)
     self.fc3 = nn.Linear(400, 120)
@@ -686,6 +749,15 @@ class LeNet5_deep(nn.Module):
     y = self.relu(self.conv12(y))
     y = self.relu(self.conv13(y))
     y = self.relu(self.conv14(y))
+    y = self.relu(self.conv15(y))
+    y = self.relu(self.conv16(y))
+    y = self.relu(self.conv17(y))
+    y = self.relu(self.conv18(y))
+    y = self.relu(self.conv19(y))
+    # y = self.relu(self.conv110(y))
+    # y = self.relu(self.conv111(y))
+    # y = self.relu(self.conv112(y))
+    # y = self.relu(self.conv113(y))
     y = self.relu(self.conv2(y)) # 16x10x10
     y = self.pool2(y)            # 16x5x5
     y = y.view(y.size(0), -1)    # 400
@@ -821,10 +893,10 @@ class SmallLeNet5_deep(nn.Module):
     y = self.relu(self.conv17(y))
     y = self.relu(self.conv18(y))
     y = self.relu(self.conv19(y))
-    y = self.relu(self.conv110(y))
-    y = self.relu(self.conv111(y))
-    y = self.relu(self.conv112(y))
-    y = self.relu(self.conv113(y))
+    # y = self.relu(self.conv110(y))
+    # y = self.relu(self.conv111(y))
+    # y = self.relu(self.conv112(y))
+    # y = self.relu(self.conv113(y))
     y = self.relu(self.conv2(y))
     y = self.pool2(y)
     y = y.view(y.size(0), -1)
@@ -832,31 +904,7 @@ class SmallLeNet5_deep(nn.Module):
     y = self.relu(self.fc4(y))
     y = self.fc5(y)
     return y
-    
-  def forward(self, y):
-    y = self.relu(self.conv1(y))
-    y = self.pool1(y)
-    y = self.relu(self.conv11(y))
-    y = self.relu(self.conv12(y))
-    y = self.relu(self.conv13(y))
-    y = self.relu(self.conv14(y))
-    y = self.relu(self.conv15(y))
-    y = self.relu(self.conv16(y))
-    y = self.relu(self.conv17(y))
-    y = self.relu(self.conv18(y))
-    y = self.relu(self.conv19(y))
-    y = self.relu(self.conv110(y))
-    y = self.relu(self.conv111(y))
-    y = self.relu(self.conv112(y))
-    y = self.relu(self.conv113(y))
-    y = self.relu(self.conv2(y))
-    y = self.pool2(y)
-    y = y.view(y.size(0), -1)
-    y = self.relu(self.fc3(y))
-    y = self.relu(self.fc4(y))
-    y = self.fc5(y)
-    return y
-    
+
 class Normalize_MNIST(nn.Module):
   def __init__(self):
     super(Normalize_MNIST, self).__init__()
