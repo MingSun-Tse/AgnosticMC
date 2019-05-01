@@ -7,25 +7,25 @@ def set_up_data(dataset, train_batch_size):
   if dataset == "CIFAR10":
     normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406],
                                       std=[0.229, 0.224, 0.225])
-    data_train = datasets.CIFAR10('./CIFAR10_data', train=True, download=True,
+    data_train = datasets.CIFAR10('./data_CIFAR10', train=True, download=True,
                                 transform=transforms.Compose([
                                   transforms.RandomHorizontalFlip(),
                                   transforms.RandomCrop(32, 4),
                                   transforms.ToTensor(),
                                   normalize,
                                 ]))
-    data_test = datasets.CIFAR10('./CIFAR10_data', train=False, download=True,
+    data_test = datasets.CIFAR10('./data_CIFAR10', train=False, download=True,
                               transform=transforms.Compose([
                                 transforms.ToTensor(),
                                 normalize,
                               ]))
   elif dataset == "MNIST":                   
-    data_train = datasets.MNIST('./MNIST_data', train=True, download=True,
+    data_train = datasets.MNIST('./data_MNIST', train=True, download=True,
                                 transform=transforms.Compose([
                                   transforms.Resize((32, 32)),
                                   transforms.ToTensor(),
                                   transforms.Normalize((0.1307,), (0.3081,))]))
-    data_test = datasets.MNIST('./MNIST_data', train=False, download=True,
+    data_test = datasets.MNIST('./data_MNIST', train=False, download=True,
                                 transform=transforms.Compose([
                                   transforms.Resize((32, 32)),
                                   transforms.ToTensor(),

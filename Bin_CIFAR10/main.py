@@ -88,11 +88,13 @@ parser.add_argument('--CodeID', type=str)
 parser.add_argument('--clip_actimax', action="store_true")
 parser.add_argument('--dataset', type=str, default="MNIST")
 parser.add_argument('--use_condition', action="store_true")
+parser.add_argument('--deeper_lenet5', action="store_true")
 args = parser.parse_args()
 
 # Update and check args
 pretrained_be_path = {
-"MNIST": "train_baseline_lenet5/*2/w*/*E17S0*.pth",
+"MNIST": "train_baseline_lenet5/trained_weights2/w*/*E17S0*.pth",
+"MNIST_deeper": "train_baseline_lenet5/trained_weights_deeper/w*/*E19S0*.pth",
 "CIFAR10": "models/model_best.pth.tar",
 }
 
@@ -101,7 +103,12 @@ assert(args.num_dec == 1)
 assert(args.mode in AutoEncoders.keys())
 assert(args.msgan_option in ["pixel", "pixelgray"])
 assert(args.dataset in ["MNIST", "CIFAR10"])
-args.e1 = pretrained_be_path[args.dataset] if args.e1 == None else args.e1
+if args.e1 == None:
+  if args.dataset == "CIFAR10":
+    args.e1 = pretrained_be_path[args.dataset]
+  else:
+    key = "MNIST_deeper" if args.deeper_lenet5 else "MNIST"
+    args.e1 = pretrained_be_path[key]
 args.e1 = check_path(args.e1)
 args.e2 = check_path(args.e2)
 args.pretrained_dir = check_path(args.pretrained_dir)
@@ -119,14 +126,16 @@ if __name__ == "__main__":
   ae = AE(args).cuda()
   
   # Set up exponential moving average
-  ema_dec = []; ema_se = []; ema_mask = []; ema_meta = []
+  ema_dec = []; ema_se = []; ema_mask = []; ema_meta = []; ema_codemap = []
   for di in range(1, args.num_dec + 1):
     ema_dec.append(EMA(args.ema_factor))
     ema_mask.append(EMA(args.ema_factor))
     ema_meta.append(EMA(args.ema_factor))
+    ema_codemap.append(EMA(args.ema_factor))
     dec = eval("ae.d%s"  % di)
     masknet = ae.mask
     metanet = ae.meta
+    codemap = ae.codemap
     for name, param in dec.named_parameters():
       if param.requires_grad:
         ema_dec[-1].register(name, param.data)
@@ -136,13 +145,17 @@ if __name__ == "__main__":
     for name, param in metanet.named_parameters():
       if param.requires_grad:
         ema_meta[-1].register(name, param.data)
+    for name, param in codemap.named_parameters():
+      if param.requires_grad:
+        ema_codemap[-1].register(name, param.data)
+
   for sei in range(1, args.num_se + 1):
     ema_se.append(EMA(args.ema_factor))
     se = eval("ae.se%s" % sei)
     for name, param in se.named_parameters():
       if param.requires_grad:
         ema_se[-1].register(name, param.data)
-        
+
   # Prepare data
   train_loader, num_train, test_loader, num_test = set_up_data(args.dataset, args.batch_size)
   
@@ -154,12 +167,13 @@ if __name__ == "__main__":
   optimizer_dec  = []
   optimizer_mask = []
   optimizer_meta = []
+  optimizer_codemap = []
   for di in range(1, args.num_dec + 1):
     dec = eval("ae.d" + str(di))
-    masknet = ae.mask
     optimizer_dec.append(torch.optim.Adam(dec.parameters(), lr=args.lr, betas=(args.b1, args.b2)))
     optimizer_mask.append(torch.optim.Adam(masknet.parameters(), lr=args.lr, betas=(args.b1, args.b2)))
     optimizer_meta.append(torch.optim.Adam(metanet.parameters(), lr=args.lr, betas=(args.b1, args.b2)))
+    optimizer_codemap.append(torch.optim.Adam(codemap.parameters(), lr=args.lr, betas=(args.b1, args.b2)))
   for sei in range(1, args.num_se + 1):
     se = eval("ae.se" + str(sei))
     optimizer_se.append(torch.optim.Adam(se.parameters(), lr=args.lr, betas=(args.b1, args.b2)))
@@ -186,13 +200,15 @@ if __name__ == "__main__":
           random_z2 = torch.cuda.FloatTensor(half_bs, args.num_z); random_z2.copy_(torch.randn(half_bs, args.num_z))
           x = torch.cat([random_z1, random_z2], dim=0)
           if args.use_condition:
-            # onehot_label = one_hot.sample_n(half_bs).view([half_bs, args.num_class]).cuda()
-            # label_concat = torch.cat([onehot_label, onehot_label], dim=0)
-            # label = label_concat.argmax(dim=1).detach()
-            # x = torch.cat([x, label_concat], dim=1).detach()
-            label_noise = torch.randn(args.batch_size, args.num_class).cuda() * args.begin
-            label = label_noise.argmax(dim=1).detach()
-            x = torch.cat([x, label_noise], dim=1).detach()
+            onehot_label = one_hot.sample_n(half_bs).view([half_bs, args.num_class]).cuda()
+            label_concat = torch.cat([onehot_label, onehot_label], dim=0)
+            label = label_concat.argmax(dim=1).detach()
+            x = torch.cat([x, label_concat], dim=1).detach()
+            # label_noise = torch.randn(args.batch_size, args.num_class).cuda() * args.begin
+            # label = label_noise.argmax(dim=1).detach()
+            # for i in range(args.batch_size):
+              # label_noise[i, label[i]] += 5
+            # x = torch.cat([x, label_noise], dim=1).detach()
         else:
           x = torch.cuda.FloatTensor(args.batch_size, args.num_z); x.copy_(torch.randn(args.batch_size, args.num_z))
           if args.use_condition:
@@ -204,9 +220,11 @@ if __name__ == "__main__":
         for di in range(1, args.num_dec + 1):
           # Set up model and ema
           dec = eval("ae.d" + str(di)); optimizer_d = optimizer_dec[di - 1]; ema_d = ema_dec[di - 1]
+          codemap = ae.codemap; optimizer_c = optimizer_codemap[di - 1]; ema_c = ema_codemap[di - 1]
           total_loss_dec = 0
 
           # Forward
+          x = codemap(x)
           imgrecs = dec(x)
           
           ## Diversity encouraging loss: MSGAN
@@ -241,6 +259,9 @@ if __name__ == "__main__":
             if args.lw_norm: total_loss_dec += imgnorm * args.lw_norm
             
             ## Classification loss, or hard-target loss in KD
+            pred = logits.detach().max(1)[1]
+            pred.eq(label.view_as(pred))
+            
             hardloss = nn.CrossEntropyLoss()(logits, label)
             hardloss_dec_all.append(hardloss.item())
             if args.lw_hard_dec: total_loss_dec += hardloss * args.lw_hard_dec
@@ -294,13 +315,13 @@ if __name__ == "__main__":
               # true_prob[i, pred_label[i]] = prob[i, label[i]]
             # loss_KL = nn.KLDivLoss()(F.log_softmax(logits, dim=1), true_prob.detach())
             # if args.lw_my_diversity: total_loss_dec += loss_KL * args.lw_my_diversity
-
+          
           dec.zero_grad()
-          total_loss_dec.backward()
+          total_loss_dec.backward(retain_graph=True)
           optimizer_d.step()
           for name, param in dec.named_parameters():
             if param.requires_grad:
-              param.data = ema_d(name, param.data)        
+              param.data = ema_d(name, param.data)
           # Gradient checking
           if args.show_interval_gradient and step % args.show_interval_gradient == 0:
             ave_grad = []
@@ -312,6 +333,15 @@ if __name__ == "__main__":
             ave_grad = ["{:<30} {:.6f}  /  {:.6f}  ({:.10f})\n".format(x[0], x[1], x[2], x[1]/x[2]) for x in ave_grad]
             ave_grad = "".join(ave_grad)
             logprint(("E{:0>%s}S{:0>%s} (grad x lr) / weight:\n{}" % (num_digit_show_epoch, num_digit_show_step)).format(epoch, step, ave_grad))
+          
+          codemap.zero_grad()
+          loss_codemap = hardloss * 100
+          loss_codemap.backward()
+          optimizer_c.step()
+          for name, param in codemap.named_parameters():
+            if param.requires_grad:
+              param.data = ema_c(name, param.data)
+          
       else:
         imgrec = torch.randn_like(img).cuda()
         imgrec_all.append(imgrec)

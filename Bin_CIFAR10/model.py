@@ -10,7 +10,6 @@ from torchvision import transforms
 import torch.nn.functional as F
 from torch.autograd import Variable
 import math
-import vgg
 pjoin = os.path.join
 
 # Exponential Moving Average
@@ -530,6 +529,20 @@ class MetaNet(nn.Module):
     # return x
 
 ################# MNIST #################
+class CodeMapping(nn.Module):
+  def __init__(self, input_dim, model=None, fixed=False):
+    super(CodeMapping, self).__init__()
+    self.fc = nn.Sequential(
+      nn.Linear(input_dim, 128),
+      nn.LeakyReLU(0.2, inplace=True),
+      nn.Linear(128, 256),
+      nn.LeakyReLU(0.2, inplace=True),
+      nn.Linear(256, input_dim),
+      nn.LeakyReLU(0.2, inplace=True),
+    )
+  def forward(self, x):
+    return self.fc(x)
+
 # ref: https://github.com/eriklindernoren/PyTorch-GAN/blob/master/implementations/dcgan/dcgan.py
 class DLeNet5_deconv(nn.Module):
   def __init__(self, input_dim, model=None, fixed=False, gray=False, num_divbranch=1):
@@ -642,13 +655,54 @@ class LeNet5(nn.Module):
     y = self.fc5(y)
     return out2, y
 
+class LeNet5_deeper(nn.Module):
+  def __init__(self, model=None, fixed=False):
+    super(LeNet5_deeper, self).__init__()
+    self.fixed = fixed
+    
+    self.conv1  = nn.Conv2d( 1,  6, kernel_size=(5, 5), stride=(1, 1), padding=(0, 0))
+    self.pool1  = nn.MaxPool2d(kernel_size=2, stride=2, padding=0)
+    self.conv11 = nn.Conv2d( 6,  8, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+    self.conv12 = nn.Conv2d( 8, 10, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+    self.conv13 = nn.Conv2d(10, 12, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+    self.conv14 = nn.Conv2d(12, 14, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+    self.conv2  = nn.Conv2d(14, 16, kernel_size=(5, 5), stride=(1, 1), padding=(0, 0))
+    self.pool2  = nn.MaxPool2d(kernel_size=2, stride=2, padding=0)
+    self.fc3 = nn.Linear(400, 120)
+    self.fc4 = nn.Linear(120,  84)
+    self.fc5 = nn.Linear( 84,  10)
+    self.relu = nn.ReLU(inplace=True)
+    
+    if model:
+      self.load_state_dict(torch.load(model))
+    if fixed:
+      for param in self.parameters():
+        param.requires_grad = False
+      
+  def forward(self, y):          # input: 1x32x32
+    y = self.relu(self.conv1(y)) # 6x28x28
+    y = self.pool1(y)            # 6x14x14
+    y = self.relu(self.conv11(y))
+    y = self.relu(self.conv12(y))
+    y = self.relu(self.conv13(y))
+    y = self.relu(self.conv14(y))
+    y = self.relu(self.conv2(y)) # 16x10x10
+    y = self.pool2(y)            # 16x5x5
+    y = y.view(y.size(0), -1)    # 400
+    y = self.relu(self.fc3(y))   # 120
+    y = self.relu(self.fc4(y))   # 84
+    y = self.fc5(y)              # 10
+    return y
+
 class SmallLeNet5(nn.Module):
   def __init__(self, model=None, fixed=False):
     super(SmallLeNet5, self).__init__()
     self.fixed = fixed
     
-    self.conv1 = nn.Conv2d( 1,  3, kernel_size=(5, 5), stride=(1, 1), padding=(0, 0)); self.pool1 = nn.MaxPool2d(kernel_size=2, stride=2, padding=0)
-    self.conv2 = nn.Conv2d( 3,  8, kernel_size=(5, 5), stride=(1, 1), padding=(0, 0)); self.pool2 = nn.MaxPool2d(kernel_size=2, stride=2, padding=0)
+    self.conv1 = nn.Conv2d( 1,  3, kernel_size=(5, 5), stride=(1, 1), padding=(0, 0))
+    self.pool1 = nn.MaxPool2d(kernel_size=2, stride=2, padding=0)
+    self.conv2 = nn.Conv2d( 3,  8, kernel_size=(5, 5), stride=(1, 1), padding=(0, 0))
+    self.pool2 = nn.MaxPool2d(kernel_size=2, stride=2, padding=0)
     self.fc3 = nn.Linear(200, 120)
     self.fc4 = nn.Linear(120,  84)
     self.fc5 = nn.Linear( 84,  10)
@@ -681,6 +735,38 @@ class SmallLeNet5(nn.Module):
     y = self.relu(self.fc4(y)); out4 = y
     y = self.fc5(y)
     return out1, out2, out3, out4, y    
+
+class SmallLeNet5_deeper(nn.Module):
+  def __init__(self, model=None, fixed=False):
+    super(SmallLeNet5_deeper, self).__init__()
+    self.fixed = fixed
+    self.conv1  = nn.Conv2d(1, 3, kernel_size=(5, 5), stride=(1, 1), padding=(0, 0))
+    self.pool1  = nn.MaxPool2d(kernel_size=2, stride=2, padding=0)
+    self.conv11 = nn.Conv2d(3, 4, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+    self.conv12 = nn.Conv2d(4, 5, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+    self.conv13 = nn.Conv2d(5, 6, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+    self.conv14 = nn.Conv2d(6, 7, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+    self.conv2  = nn.Conv2d(7, 8, kernel_size=(5, 5), stride=(1, 1), padding=(0, 0))
+    self.pool2  = nn.MaxPool2d(kernel_size=2, stride=2, padding=0)
+    self.fc3 = nn.Linear(200, 120)
+    self.fc4 = nn.Linear(120,  84)
+    self.fc5 = nn.Linear( 84,  10)
+    self.relu = nn.ReLU(inplace=True)
+    
+  def forward(self, y):
+    y = self.relu(self.conv1(y))
+    y = self.pool1(y)
+    y = self.relu(self.conv11(y))
+    y = self.relu(self.conv12(y))
+    y = self.relu(self.conv13(y))
+    y = self.relu(self.conv14(y))
+    y = self.relu(self.conv2(y))
+    y = self.pool2(y)
+    y = y.view(y.size(0), -1)
+    y = self.relu(self.fc3(y))
+    y = self.relu(self.fc4(y))
+    y = self.fc5(y)
+    return y
 
 class Normalize_MNIST(nn.Module):
   def __init__(self):
@@ -808,7 +894,11 @@ class AutoEncoder_GAN4(nn.Module):
       BE = VGG19; Dec = DVGG19_deconv; SE = SmallVGG19
       self.normalize = Normalize_CIFAR10()
     elif args.dataset == "MNIST":
-      BE = LeNet5; Dec = DLeNet5_deconv; SE = SmallLeNet5
+      Dec = DLeNet5_deconv
+      if args.deeper_lenet5:
+        BE = LeNet5_deeper; SE = SmallLeNet5_deeper
+      else:
+        BE = LeNet5; SE = SmallLeNet5
       self.normalize = Normalize_MNIST()
     
     self.be = BE(args.e1, fixed=True)
@@ -819,6 +909,9 @@ class AutoEncoder_GAN4(nn.Module):
     self.bn3 = nn.BatchNorm2d(16)
     self.bn4 = nn.BatchNorm2d( 3)
     
+    input_dim = args.num_z + args.num_class if args.use_condition else args.num_z
+    self.codemap = CodeMapping(input_dim)
+    
     for di in range(1, args.num_dec + 1):
       pretrained_model = None
       if args.pretrained_dir:
@@ -826,7 +919,6 @@ class AutoEncoder_GAN4(nn.Module):
         pretrained_model = [x for x in os.listdir(args.pretrained_dir) if "_d%s_" % di in x and args.pretrained_timeid in x] # the number of pretrained decoder should be like "SERVER218-20190313-1233_d3_E0S0.pth"
         assert(len(pretrained_model) == 1)
         pretrained_model = pretrained_model[0]
-      input_dim = args.num_z + args.num_class if args.use_condition else args.num_z
       self.__setattr__("d" + str(di), Dec(input_dim, pretrained_model, fixed=False, gray=args.gray, num_divbranch=args.num_divbranch))
       self.mask = MaskNet(input_dim)
       self.meta = MetaNet(input_dim)

@@ -26,8 +26,8 @@ from model import LeNet5, LeNet5_deeper
 
 def logprint(some_str, f=sys.stdout):
   print(time.strftime("[%s" % os.getpid() + "-%Y/%m/%d-%H:%M] ") + str(some_str), file=f, flush=True)
-  
-  
+
+
 if __name__ == "__main__":
   # Some settings
   SHOW_INTERVAL = 10
