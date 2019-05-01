@@ -833,6 +833,30 @@ class SmallLeNet5_deep(nn.Module):
     y = self.fc5(y)
     return y
     
+  def forward(self, y):
+    y = self.relu(self.conv1(y))
+    y = self.pool1(y)
+    y = self.relu(self.conv11(y))
+    y = self.relu(self.conv12(y))
+    y = self.relu(self.conv13(y))
+    y = self.relu(self.conv14(y))
+    y = self.relu(self.conv15(y))
+    y = self.relu(self.conv16(y))
+    y = self.relu(self.conv17(y))
+    y = self.relu(self.conv18(y))
+    y = self.relu(self.conv19(y))
+    y = self.relu(self.conv110(y))
+    y = self.relu(self.conv111(y))
+    y = self.relu(self.conv112(y))
+    y = self.relu(self.conv113(y))
+    y = self.relu(self.conv2(y))
+    y = self.pool2(y)
+    y = y.view(y.size(0), -1)
+    y = self.relu(self.fc3(y))
+    y = self.relu(self.fc4(y))
+    y = self.fc5(y)
+    return y
+    
 class Normalize_MNIST(nn.Module):
   def __init__(self):
     super(Normalize_MNIST, self).__init__()
