@@ -1,1 +1,1 @@
-../model_augdec.py
+../model.py
