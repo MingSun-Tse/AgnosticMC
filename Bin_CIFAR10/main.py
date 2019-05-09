@@ -88,7 +88,8 @@ parser.add_argument('--CodeID', type=str)
 parser.add_argument('--clip_actimax', action="store_true")
 parser.add_argument('--dataset', type=str, default="MNIST")
 parser.add_argument('--use_condition', action="store_true")
-parser.add_argument('--deep_lenet5', type=str, default="00", help="11: deep teacher and deep student; 10: deep teacher and shallow student")
+parser.add_argument('--deep_lenet5', type=str, default="00", help="'1' means using deep model and '0' means \
+not, such as '11': deep teacher + deep student, '10': deep teacher + shallow student")
 args = parser.parse_args()
 
 # Update and check args
@@ -224,7 +225,7 @@ if __name__ == "__main__":
           total_loss_dec = 0
 
           # Forward
-          x = codemap(x)
+          # x = codemap(x) ## TODO: new idea to impl.
           imgrecs = dec(x)
           
           ## Diversity encouraging loss: MSGAN
@@ -259,9 +260,8 @@ if __name__ == "__main__":
             if args.lw_norm: total_loss_dec += imgnorm * args.lw_norm
             
             ## Classification loss, or hard-target loss in KD
-            pred = logits.detach().max(1)[1]
-            pred.eq(label.view_as(pred))
-            
+            # pred = logits.detach().max(1)[1] ## TODO: new idea to impl.
+            # pred.eq(label.view_as(pred))
             hardloss = nn.CrossEntropyLoss()(logits, label)
             hardloss_dec_all.append(hardloss.item())
             if args.lw_hard_dec: total_loss_dec += hardloss * args.lw_hard_dec
