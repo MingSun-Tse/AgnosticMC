@@ -1032,7 +1032,7 @@ class Transform(nn.Module): # random transform combination
         y = T(y)
     return y    
 
-################# Transform #################
+################# AutoEncoder #################
 class AutoEncoder_GAN4(nn.Module):
   def __init__(self, args):
     super(AutoEncoder_GAN4, self).__init__()
