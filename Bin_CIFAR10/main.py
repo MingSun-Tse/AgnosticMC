@@ -49,7 +49,6 @@ parser.add_argument('--b1',  type=float, default=5e-4, help='adam: decay of firs
 parser.add_argument('--b2',  type=float, default=0.999, help='adam: decay of second order momentum of gradient')
 # ----------------------------------------------------------------
 # various losses
-parser.add_argument('--lw_perc', type=float, default=1, help="perceptual loss")
 parser.add_argument('--lw_soft', type=float, default=10) # According to the paper KD, the soft target loss weight should be considarably larger than that of hard target loss.
 parser.add_argument('--lw_hard_dec', type=float, default=1)
 parser.add_argument('--lw_hard_se', type=float, default=1)
@@ -399,7 +398,7 @@ if __name__ == "__main__":
         logprint(("E{:0>%s}S{:0>%s} | Saving image samples" % (num_digit_show_epoch, num_digit_show_step)).format(epoch, step))
         if args.use_condition:
           test_codes = torch.randn([args.num_class, args.num_z])
-          label_noise = torch.randn([args.num_class, args.num_class])
+          label_noise = torch.eye(args.num_class) # torch.randn([args.num_class, args.num_class]) 
           test_codes = torch.cat([test_codes, label_noise], dim=1)
           label = label_noise.argmax(dim=1)
           for i in range(len(test_codes)):
