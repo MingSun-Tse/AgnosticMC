@@ -708,7 +708,52 @@ class LeNet5(nn.Module):
     # y = self.relu(self.fc4(y)); out4 = y
     # y = self.fc5(y)
     # return out2, y
+   
+# The LeNet5 model that has only two neurons in the last FC hidden layer, easy for feature visualization.
+# Take the idea from 2016 ECCV center loss: https://kpzhang93.github.io/papers/eccv2016.pdf
+class LeNet5_2neurons(nn.Module):
+  def __init__(self, model=None, fixed=False):
+    super(LeNet5_2neurons, self).__init__()
+    self.fixed = fixed
     
+    self.conv1 = nn.Conv2d( 1,  6, kernel_size=(5, 5), stride=(1, 1), padding=(0, 0)); self.pool1 = nn.MaxPool2d(kernel_size=2, stride=2, padding=0)
+    self.conv2 = nn.Conv2d( 6, 16, kernel_size=(5, 5), stride=(1, 1), padding=(0, 0)); self.pool2 = nn.MaxPool2d(kernel_size=2, stride=2, padding=0)
+    self.fc3 = nn.Linear(400, 120)
+    self.fc4 = nn.Linear(120,  84)
+    self.fc5 = nn.Linear( 84,   2)
+    self.fc6 = nn.Linear(  2,  10)
+    self.relu = nn.ReLU(inplace=True)
+    
+    if model:
+      self.load_state_dict(torch.load(model))
+    if fixed:
+      for param in self.parameters():
+        param.requires_grad = False
+      
+  def forward(self, y):          # input: 1x32x32
+    y = self.relu(self.conv1(y)) # 6x28x28
+    y = self.pool1(y)            # 6x14x14
+    y = self.relu(self.conv2(y)) # 16x10x10
+    y = self.pool2(y)            # 16x5x5
+    y = y.view(y.size(0), -1)    # 400
+    y = self.relu(self.fc3(y))   # 120
+    y = self.relu(self.fc4(y))   # 84
+    y = self.relu(self.fc5(y))   # 2
+    y = self.fc6(y)              # 10
+    return y
+  
+  def forward_branch(self, y):
+    y = self.relu(self.conv1(y)); out1 = y
+    y = self.pool1(y)
+    y = self.relu(self.conv2(y)); out2 = y
+    y = self.pool2(y)
+    y = y.view(y.size(0), -1)
+    y = self.relu(self.fc3(y)); out3 = y
+    y = self.relu(self.fc4(y)); out4 = y
+    y = self.relu(self.fc5(y)); out5 = y
+    y = self.fc6(y)
+    return out2, y
+   
 class LeNet5_deep(nn.Module):
   def __init__(self, model=None, fixed=False):
     super(LeNet5_deep, self).__init__()
@@ -789,7 +834,7 @@ class LeNet5_deep(nn.Module):
     y = self.relu(self.fc4(y)); out4 = y
     y = self.fc5(y)
     return out2, y
-    
+ 
 class SmallLeNet5(nn.Module):
   def __init__(self, model=None, fixed=False):
     super(SmallLeNet5, self).__init__()
@@ -1041,10 +1086,8 @@ class AutoEncoder_GAN4(nn.Module):
       self.normalize = Normalize_CIFAR10()
     elif args.dataset == "MNIST":
       Dec = DLeNet5_deconv
-      mark_be = int(args.deep_lenet5[0]) * "_deep"
-      mark_se = int(args.deep_lenet5[1]) * "_deep"
-      BE = eval("LeNet5" + mark_be)
-      SE = eval("SmallLeNet5" + mark_se)
+      BE = eval("LeNet5" + args.which_lenet)
+      SE = eval("SmallLeNet5" + int(args.deep_lenet5[1]) * "_deep")
       self.normalize = Normalize_MNIST()
     
     self.be = BE(args.e1, fixed=True)

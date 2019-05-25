@@ -81,19 +81,20 @@ parser.add_argument('--noise_magnitude', type=float, default=0)
 parser.add_argument('--CodeID', type=str)
 parser.add_argument('--clip_actimax', action="store_true")
 parser.add_argument('--dataset', type=str, default="MNIST")
-parser.add_argument('--use_condition', action="store_true")
+parser.add_argument('--which_lenet', type=str, default="", help="options: '' (default), '_deep', '_2neurons' ")
 parser.add_argument('--deep_lenet5', type=str, default="00", help="'1' means using deep model and '0' means \
 not, such as '11': deep teacher + deep student, '10': deep teacher + shallow student")
+parser.add_argument('--use_condition', action="store_true")
 args = parser.parse_args()
 
 # Update and check args
 pretrained_be_path = {
-"MNIST": "train_baseline_lenet5/trained_weights2/w*/*E17S0*.pth",
-"MNIST_deep": "train_baseline_lenet5/trained_weights_verydeep/weights/*E16S0*.pth", #"train_baseline_lenet5/trained_weights_deep/w*/*E19S0*.pth",
-"CIFAR10": "models/model_best.pth.tar",
+  "MNIST"          : "train_baseline_lenet5/trained_weights2/w*/*E17S0*.pth",
+  "MNIST_deep"     : "train_baseline_lenet5/trained_weights_verydeep/w*/*E16S0*.pth", #"train_baseline_lenet5/trained_weights_deep/w*/*E19S0*.pth",
+  "MNIST_2neurons" : "train_baseline_lenet5/trained_weights_*2neurons/w*/*E21S0*.pth",
+  "CIFAR10"        : "models/model_best.pth.tar",
 }
-
-assert(args.num_se == 1)
+assert(args.num_se  == 1)
 assert(args.num_dec == 1)
 assert(args.mode in AutoEncoders.keys())
 assert(args.msgan_option in ["pixel", "pixelgray"])
@@ -102,7 +103,7 @@ if args.e1 == None:
   if args.dataset == "CIFAR10":
     args.e1 = pretrained_be_path[args.dataset]
   else:
-    key = "MNIST" + "_deep" * int(args.deep_lenet5[0])
+    key = "MNIST" + args.which_lenet
     args.e1 = pretrained_be_path[key]
 args.e1 = check_path(args.e1)
 args.e2 = check_path(args.e2)

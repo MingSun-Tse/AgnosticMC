@@ -21,7 +21,7 @@ import torchvision.utils as vutils
 import torchvision.transforms as transforms
 import torchvision.datasets as datasets
 # my libs
-from model import LeNet5, LeNet5_deep
+from model import LeNet5, LeNet5_deep, LeNet5_2neurons
 
 
 def logprint(some_str, f=sys.stdout):
@@ -44,7 +44,7 @@ if __name__ == "__main__":
   parser.add_argument('-r', '--resume', action='store_true', help='if resume, default=False')
   parser.add_argument('--epoch', type=int, default=31)
   parser.add_argument('--debug', action="store_true")
-  parser.add_argument('--deep', action="store_true")
+  parser.add_argument('--which_net', type=str, default="", help="options: '_2neurons', '_deep', or '' (default)")
   args = parser.parse_args()
   
   # Get path
@@ -69,7 +69,7 @@ if __name__ == "__main__":
   log = sys.stdout if args.debug else open(log_path, "w+")
   
   # Set up model
-  net = LeNet5_deep(args.model) if args.deep else LeNet5(args.model)
+  net = eval("LeNet5" + args.which_net)(args.model)
   net.cuda()
 
   # Prepare data
