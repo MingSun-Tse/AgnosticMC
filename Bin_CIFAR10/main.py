@@ -58,6 +58,7 @@ parser.add_argument('--lw_DT',   type=float, default=0, help="DT means 'defined 
 parser.add_argument('--lw_adv',  type=float, default=0)
 parser.add_argument('--lw_actimax',  type=float, default=0)
 parser.add_argument('--lw_msgan',  type=float, default=1e-30) # 100)
+parser.add_argument('--lw_msgan_feat',  type=float, default=0) # 100)
 parser.add_argument('--lw_feat_L1_norm', type=float, default=0, help="ref to DFL paper")
 parser.add_argument('--lw_class_balance', type=float, default=1000, help="ref to DFL paper")
 # ----------------------------------------------------------------
@@ -76,7 +77,6 @@ parser.add_argument('--show_interval_gradient', type=int, default=0, help="the i
 parser.add_argument('--save_interval', type=int, default=100, help="the interval to save sample images")
 parser.add_argument('--test_interval', type=int, default=1000, help="the interval to test and save models")
 parser.add_argument('--gray', action="store_true")
-parser.add_argument('--msgan_option', type=str, default="pixel")
 parser.add_argument('--noise_magnitude', type=float, default=0)
 parser.add_argument('--CodeID', type=str)
 parser.add_argument('--clip_actimax', action="store_true")
@@ -97,7 +97,6 @@ pretrained_be_path = {
 assert(args.num_se  == 1)
 assert(args.num_dec == 1)
 assert(args.mode in AutoEncoders.keys())
-assert(args.msgan_option in ["pixel", "pixelgray"])
 assert(args.dataset in ["MNIST", "CIFAR10"])
 if args.e1 == None:
   if args.dataset == "CIFAR10":
@@ -122,28 +121,13 @@ if __name__ == "__main__":
   ae = AE(args).cuda()
   
   # Set up exponential moving average
-  ema_dec = []; ema_se = []; ema_mask = []; ema_meta = []; ema_codemap = []
+  ema_dec = []; ema_se = []
   for di in range(1, args.num_dec + 1):
     ema_dec.append(EMA(args.ema_factor))
-    ema_mask.append(EMA(args.ema_factor))
-    ema_meta.append(EMA(args.ema_factor))
-    ema_codemap.append(EMA(args.ema_factor))
     dec = eval("ae.d%s"  % di)
-    masknet = ae.mask
-    metanet = ae.meta
-    codemap = ae.codemap
     for name, param in dec.named_parameters():
       if param.requires_grad:
         ema_dec[-1].register(name, param.data)
-    for name, param in masknet.named_parameters():
-      if param.requires_grad:
-        ema_mask[-1].register(name, param.data)
-    for name, param in metanet.named_parameters():
-      if param.requires_grad:
-        ema_meta[-1].register(name, param.data)
-    for name, param in codemap.named_parameters():
-      if param.requires_grad:
-        ema_codemap[-1].register(name, param.data)
 
   for sei in range(1, args.num_se + 1):
     ema_se.append(EMA(args.ema_factor))
@@ -159,17 +143,11 @@ if __name__ == "__main__":
   logprint(args._get_kwargs())
   
   # Optimizer
-  optimizer_se   = []
-  optimizer_dec  = []
-  optimizer_mask = []
-  optimizer_meta = []
-  optimizer_codemap = []
+  optimizer_se  = []
+  optimizer_dec = []
   for di in range(1, args.num_dec + 1):
     dec = eval("ae.d" + str(di))
     optimizer_dec.append(torch.optim.Adam(dec.parameters(), lr=args.lr, betas=(args.b1, args.b2)))
-    optimizer_mask.append(torch.optim.Adam(masknet.parameters(), lr=args.lr, betas=(args.b1, args.b2)))
-    optimizer_meta.append(torch.optim.Adam(metanet.parameters(), lr=args.lr, betas=(args.b1, args.b2)))
-    optimizer_codemap.append(torch.optim.Adam(codemap.parameters(), lr=args.lr, betas=(args.b1, args.b2)))
   for sei in range(1, args.num_se + 1):
     se = eval("ae.se" + str(sei))
     optimizer_se.append(torch.optim.Adam(se.parameters(), lr=args.lr, betas=(args.b1, args.b2)))
@@ -192,8 +170,8 @@ if __name__ == "__main__":
         # Generate codes randomly
         if args.lw_msgan:
           half_bs = int(args.batch_size / 2)
-          random_z1 = torch.randn(half_bs, args.num_z).cuda() # torch.cuda.FloatTensor(half_bs, args.num_z); random_z1.copy_(torch.randn(half_bs, args.num_z))
-          random_z2 = torch.randn(half_bs, args.num_z).cuda() # torch.cuda.FloatTensor(half_bs, args.num_z); random_z2.copy_(torch.randn(half_bs, args.num_z))
+          random_z1 = torch.randn(half_bs, args.num_z).cuda()
+          random_z2 = torch.randn(half_bs, args.num_z).cuda()
           x = torch.cat([random_z1, random_z2], dim=0)
           if args.use_condition:
             onehot_label = one_hot.sample_n(half_bs).view([half_bs, args.num_class]).cuda()
@@ -206,7 +184,7 @@ if __name__ == "__main__":
               # label_noise[i, label[i]] += 5
             # x = torch.cat([x, label_noise], dim=1).detach()
         else:
-          x = torch.cuda.FloatTensor(args.batch_size, args.num_z); x.copy_(torch.randn(args.batch_size, args.num_z))
+          x = torch.randn(args.batch_size, args.num_z).cuda()
           if args.use_condition:
             onehot_label = one_hot.sample_n(args.batch_size).view([args.batch_size, args.num_class]).cuda()
             label = onehot_label.argmax(dim=1).detach()
@@ -216,35 +194,36 @@ if __name__ == "__main__":
         for di in range(1, args.num_dec + 1):
           # Set up model and ema
           dec = eval("ae.d" + str(di)); optimizer_d = optimizer_dec[di - 1]; ema_d = ema_dec[di - 1]
-          # codemap = ae.codemap; optimizer_c = optimizer_codemap[di - 1]; ema_c = ema_codemap[di - 1]
           total_loss_dec = 0
 
           # Forward
-          # x = codemap(x) ## TODO: new idea to impl.
           imgrecs = dec(x)
           
           ## Diversity encouraging loss: MSGAN
           # ref: 2019 CVPR Mode Seeking Generative Adversarial Networks for Diverse Image Synthesis
           if args.lw_msgan:
-            if args.msgan_option == "pixel":
-              imgrecs_1, imgrecs_2 = torch.split(imgrecs, half_bs, dim=0)
-              lz_pixel = torch.mean(torch.abs(imgrecs_1 - imgrecs_2)) / torch.mean(torch.abs(random_z1 - random_z2))
-            elif args.msgan_option == "pixelgray": # deprecated
-              imgrecs_1, imgrecs_2 = torch.split(imgrecs, half_bs, dim=0)
-              imgrecs_1 = imgrecs_1[:,0,:,:] * 0.299 + imgrecs_1[:,1,:,:] * 0.587 + imgrecs_1[:,2,:,:] * 0.114 # the Y channel (Luminance) of an image
-              imgrecs_2 = imgrecs_2[:,0,:,:] * 0.299 + imgrecs_2[:,1,:,:] * 0.587 + imgrecs_2[:,2,:,:] * 0.114
-              lz_pixel = torch.mean(torch.abs(imgrecs_1 - imgrecs_2)) / torch.mean(torch.abs(random_z1 - random_z2))
+            imgrecs_1, imgrecs_2 = torch.split(imgrecs, half_bs, dim=0)
+            lz_pixel = torch.mean(torch.abs(imgrecs_1 - imgrecs_2)) / torch.mean(torch.abs(random_z1 - random_z2))
             total_loss_dec += -args.lw_msgan * lz_pixel
-          
+
           imgrecs_split = torch.split(imgrecs, num_channel, dim=1)
           for imgrec in imgrecs_split:
             # forward
-            imgrec_all.append(imgrec.detach()) # for SE
+            imgrec_all.append(imgrec.detach()) # for the following SE training
             feats = ae.be.forward_branch(imgrec)
-            logits = feats[-1]; last_feature = feats[-2]
+            logits = feats[-1]
+            last_feature = feats[-2] # DFL paper
             logits_all.append(logits.detach())
             if not args.use_condition:
               label = logits.argmax(dim=1).detach()
+            
+            ## use msgan idea on the feature
+            if args.lw_msgan and args.lw_msgan_feat:
+              for i in range(len(feats) - 2):
+                fs = feats[i]
+                fs_1, fs_2 = torch.split(fs, half_bs, dim=0)
+                lz_feat = torch.mean(torch.abs(fs_1 - fs_2)) / torch.mean(torch.abs(random_z1 - random_z2))
+                total_loss_dec += -args.lw_msgan_feat * lz_feat
             
             ## Low-level natural image prior: tv + image norm
             # ref: 2015 CVPR Understanding Deep Image Representations by Inverting Them
@@ -328,15 +307,6 @@ if __name__ == "__main__":
             ave_grad = ["{:<30} {:.6f}  /  {:.6f}  ({:.10f})\n".format(x[0], x[1], x[2], x[1]/x[2]) for x in ave_grad]
             ave_grad = "".join(ave_grad)
             logprint(("E{:0>%s}S{:0>%s} (grad x lr) / weight:\n{}" % (num_digit_show_epoch, num_digit_show_step)).format(epoch, step, ave_grad))
-          
-          ## TODO: new idea to impl.
-          # codemap.zero_grad()
-          # loss_codemap = hardloss * 100
-          # loss_codemap.backward()
-          # optimizer_c.step()
-          # for name, param in codemap.named_parameters():
-            # if param.requires_grad:
-              # param.data = ema_c(name, param.data)
           
       else:
         imgrecs = torch.randn_like(img).cuda()

@@ -87,9 +87,7 @@ cfg = {
     'SE': [32, 32, 'M', 64, 64, 'M', 128, 128, 128, 128, 'M', 256, 256, 256, 256, 'M', 256, 256, 256, 256, 'M'],
     'Dec':       ["Up", 512, 512, "Up", 512, 512, "Up", 256, 256, "Up", 128, 128, "Up", 64, 3],
     'Dec_s':     ["Up", 128, 128, "Up", 128, 128, "Up",  64,  64, "Up",  32,  32, "Up", 16, 3],
-    'Dec_meta':  ["Up", 128, 128, "Up", 128, 128, "Up",  64,  64, "Up"],
     'Dec_s_aug': ["Up", 128, 128, "Up", 128, 128, "Up",  64,  64, "Up", "64-2", "32x-4", "Up", "16x-x", "3x-x"],
-    'Mask':      ["Up",  64,  64, "Up",  64,  64, "Up",  32,  32, "Up",  32,  32, "Up", 16, 1],
     'Dec_gray':  ["Up", 512, 512, "Up", 512, 512, "Up", 256, 256, "Up", 128, 128, "Up", 64, 1],
 }
 
@@ -381,112 +379,6 @@ class DVGG19_aug(nn.Module): # augmented DVGG19
     y.append(x)
     return y
     
-# deprecated
-class DVGG19_meta(nn.Module):
-  def __init__(self, input_dim, model=None, fixed=None, gray=False, num_divbranch=1):
-    super(DVGG19_meta, self).__init__()
-    self.classifier = nn.Sequential(
-      nn.Linear(input_dim, 512),
-      nn.ReLU(True),
-      nn.Linear(512, 512),
-      nn.ReLU(True),
-      nn.Linear(512, 512),
-      nn.ReLU(True),
-    )
-    self.features = make_layers_dec(cfg["Dec_meta"], batch_norm=True)
-    
-    if model:
-      checkpoint = torch.load(model)
-      self.load_state_dict(checkpoint)
-    else:
-      for m in self.modules():
-        if isinstance(m, nn.Conv2d):
-          n = m.kernel_size[0] * m.kernel_size[1] * m.out_channels
-          m.weight.data.normal_(0, math.sqrt(2. / n))
-          m.bias.data.zero_()
-
-    if fixed:
-      for param in self.parameters():
-          param.requires_grad = False
-          
-  def forward(self, x):
-    x = self.classifier(x)
-    x = x.view(x.size(0), 512, 1, 1)
-    x = self.features(x)
-    return x
-
-# deprecated
-class MaskNet(nn.Module):
-  def __init__(self, input_dim, model=None, fixed=None, gray=False, num_divbranch=1):
-    super(MaskNet, self).__init__()
-    self.classifier = nn.Sequential(
-      nn.Linear(input_dim, 512),
-      nn.ReLU(True),
-      nn.Linear(512, 512),
-      nn.ReLU(True),
-    )
-    self.features = make_layers_dec(cfg["Mask"])
-    
-    if model:
-     checkpoint = torch.load(model)
-     self.load_state_dict(checkpoint)
-    else:
-      for m in self.modules():
-        if isinstance(m, nn.Conv2d):
-          n = m.kernel_size[0] * m.kernel_size[1] * m.out_channels
-          m.weight.data.normal_(0, math.sqrt(2. / n))
-          m.bias.data.zero_()
-
-    if fixed:
-      for param in self.parameters():
-          param.requires_grad = False
-          
-  def forward(self, x):
-    x = self.classifier(x)
-    x = x.view(x.size(0), 512, 1, 1)
-    x = self.features(x)
-    return x
-
-# deprecated
-class MetaNet(nn.Module):
-  def __init__(self, input_dim, model=None, fixed=None, gray=False, num_divbranch=1):
-    super(MetaNet, self).__init__()
-    self.classifier = nn.Sequential(
-      nn.Linear(input_dim, 128),
-      nn.ReLU(True),
-      nn.Linear(128, 128),
-      nn.ReLU(True),
-      nn.Linear(128, 144),
-      nn.ReLU(True),
-    ) # 144 = 16x3x3
-    self.conv1 = nn.Conv2d(16, 2048, kernel_size=3, padding=1)
-    self.conv2 = nn.Conv2d(16, 1024, kernel_size=3, padding=1)
-    self.conv3 = nn.Conv2d(16,  512, kernel_size=3, padding=1)
-    self.conv4 = nn.Conv2d(16,   48, kernel_size=3, padding=1)
-    self.tanh = nn.Tanh()
-    
-    if model:
-     checkpoint = torch.load(model)
-     self.load_state_dict(checkpoint)
-    else:
-      for m in self.modules():
-        if isinstance(m, nn.Conv2d):
-          n = m.kernel_size[0] * m.kernel_size[1] * m.out_channels
-          m.weight.data.normal_(0, math.sqrt(2. / n))
-          m.bias.data.zero_()
-    if fixed:
-      for param in self.parameters():
-          param.requires_grad = False
-          
-  def forward(self, x):
-    x = self.classifier(x)
-    x = x.view(x.size(0), 16, 3, 3)
-    y1 = self.tanh(self.conv1(x)) # batch x 2048 x 3 x 3
-    y2 = self.tanh(self.conv2(x)) # batch x 1024 x 3 x 3
-    y3 = self.tanh(self.conv3(x)) # batch x  512 x 3 x 3
-    y4 = self.tanh(self.conv4(x)) # batch x   48 x 3 x 3
-    return [y1, y2, y3, y4]
-
 # class DVGG19_deconv(nn.Module):
   # def __init__(self, input_dim, model=None, fixed=None, gray=False, d=128):
     # super(DVGG19_deconv, self).__init__()
@@ -530,20 +422,6 @@ class MetaNet(nn.Module):
     # return x
 
 ################# MNIST #################
-class CodeMapping(nn.Module):
-  def __init__(self, input_dim, model=None, fixed=False):
-    super(CodeMapping, self).__init__()
-    self.fc = nn.Sequential(
-      nn.Linear(input_dim, 128),
-      nn.LeakyReLU(0.2, inplace=True),
-      nn.Linear(128, 256),
-      nn.LeakyReLU(0.2, inplace=True),
-      nn.Linear(256, input_dim),
-      nn.LeakyReLU(0.2, inplace=True),
-    )
-  def forward(self, x):
-    return self.fc(x)
-
 # ref: https://github.com/eriklindernoren/PyTorch-GAN/blob/master/implementations/dcgan/dcgan.py
 class DLeNet5_deconv(nn.Module):
   def __init__(self, input_dim, model=None, fixed=False, gray=False, num_divbranch=1):
@@ -753,7 +631,7 @@ class LeNet5_2neurons(nn.Module):
     y = self.relu(self.fc4(y)); out4 = y
     y = self.relu(self.fc5(y)); out5 = y
     y = self.fc6(y)
-    return out2, y
+    return out1, out2, out3, out4, out5, out2, y
    
   def forward_2neurons(self, y):
     y = self.relu(self.conv1(y))
@@ -765,7 +643,6 @@ class LeNet5_2neurons(nn.Module):
     y = self.relu(self.fc4(y))
     y = self.fc5(y)
     return y
-   
    
 class LeNet5_deep(nn.Module):
   def __init__(self, model=None, fixed=False):
@@ -1111,9 +988,6 @@ class AutoEncoder_GAN4(nn.Module):
     self.bn3 = nn.BatchNorm2d(16)
     self.bn4 = nn.BatchNorm2d( 3)
     
-    input_dim = args.num_z + args.num_class if args.use_condition else args.num_z
-    self.codemap = CodeMapping(input_dim)
-    
     for di in range(1, args.num_dec + 1):
       pretrained_model = None
       if args.pretrained_dir:
@@ -1121,9 +995,8 @@ class AutoEncoder_GAN4(nn.Module):
         pretrained_model = [x for x in os.listdir(args.pretrained_dir) if "_d%s_" % di in x and args.pretrained_timeid in x] # the number of pretrained decoder should be like "SERVER218-20190313-1233_d3_E0S0.pth"
         assert(len(pretrained_model) == 1)
         pretrained_model = pretrained_model[0]
+      input_dim = args.num_z + args.num_class if args.use_condition else args.num_z
       self.__setattr__("d" + str(di), Dec(input_dim, pretrained_model, fixed=False, gray=args.gray, num_divbranch=args.num_divbranch))
-      self.mask = MaskNet(input_dim)
-      self.meta = MetaNet(input_dim)
     
     for sei in range(1, args.num_se + 1):
       self.__setattr__("se" + str(sei), SE(args.e2, fixed=False))
