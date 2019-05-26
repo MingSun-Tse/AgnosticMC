@@ -1,4 +1,5 @@
 import torchvision.models as models
+import torchvision.models as models
 import numpy as np
 import os
 import copy
@@ -753,6 +754,18 @@ class LeNet5_2neurons(nn.Module):
     y = self.relu(self.fc5(y)); out5 = y
     y = self.fc6(y)
     return out2, y
+   
+  def forward_2neurons(self, y):
+    y = self.relu(self.conv1(y))
+    y = self.pool1(y)
+    y = self.relu(self.conv2(y))
+    y = self.pool2(y)
+    y = y.view(y.size(0), -1)
+    y = self.relu(self.fc3(y))
+    y = self.relu(self.fc4(y))
+    y = self.fc5(y)
+    return y
+   
    
 class LeNet5_deep(nn.Module):
   def __init__(self, model=None, fixed=False):

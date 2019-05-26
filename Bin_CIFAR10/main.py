@@ -28,7 +28,7 @@ from torch.autograd import Variable
 # my libs
 from model import AutoEncoders, EMA, preprocess_image, recreate_image
 from data import set_up_data
-from util import check_path, get_previous_step, LogPrint, set_up_dir
+from util import check_path, get_previous_step, LogPrint, set_up_dir, feat_visualize
 
 
 # Passed-in params
@@ -192,8 +192,8 @@ if __name__ == "__main__":
         # Generate codes randomly
         if args.lw_msgan:
           half_bs = int(args.batch_size / 2)
-          random_z1 = torch.cuda.FloatTensor(half_bs, args.num_z); random_z1.copy_(torch.randn(half_bs, args.num_z))
-          random_z2 = torch.cuda.FloatTensor(half_bs, args.num_z); random_z2.copy_(torch.randn(half_bs, args.num_z))
+          random_z1 = torch.randn(half_bs, args.num_z).cuda() # torch.cuda.FloatTensor(half_bs, args.num_z); random_z1.copy_(torch.randn(half_bs, args.num_z))
+          random_z2 = torch.randn(half_bs, args.num_z).cuda() # torch.cuda.FloatTensor(half_bs, args.num_z); random_z2.copy_(torch.randn(half_bs, args.num_z))
           x = torch.cat([random_z1, random_z2], dim=0)
           if args.use_condition:
             onehot_label = one_hot.sample_n(half_bs).view([half_bs, args.num_class]).cuda()
@@ -216,7 +216,7 @@ if __name__ == "__main__":
         for di in range(1, args.num_dec + 1):
           # Set up model and ema
           dec = eval("ae.d" + str(di)); optimizer_d = optimizer_dec[di - 1]; ema_d = ema_dec[di - 1]
-          codemap = ae.codemap; optimizer_c = optimizer_codemap[di - 1]; ema_c = ema_codemap[di - 1]
+          # codemap = ae.codemap; optimizer_c = optimizer_codemap[di - 1]; ema_c = ema_codemap[di - 1]
           total_loss_dec = 0
 
           # Forward
@@ -329,18 +329,19 @@ if __name__ == "__main__":
             ave_grad = "".join(ave_grad)
             logprint(("E{:0>%s}S{:0>%s} (grad x lr) / weight:\n{}" % (num_digit_show_epoch, num_digit_show_step)).format(epoch, step, ave_grad))
           
-          codemap.zero_grad()
-          loss_codemap = hardloss * 100
-          loss_codemap.backward()
-          optimizer_c.step()
-          for name, param in codemap.named_parameters():
-            if param.requires_grad:
-              param.data = ema_c(name, param.data)
+          ## TODO: new idea to impl.
+          # codemap.zero_grad()
+          # loss_codemap = hardloss * 100
+          # loss_codemap.backward()
+          # optimizer_c.step()
+          # for name, param in codemap.named_parameters():
+            # if param.requires_grad:
+              # param.data = ema_c(name, param.data)
           
       else:
-        imgrec = torch.randn_like(img).cuda()
-        imgrec_all.append(imgrec)
-        feats = ae.be.forward_branch(imgrec)
+        imgrecs = torch.randn_like(img).cuda()
+        imgrec_all.append(imgrecs)
+        feats = ae.be.forward_branch(imgrecs)
         logits = feats[-1]; last_feature = feats[-2]
         logits_all.append(logits.detach())
         label = logits.argmax(dim=1).detach()
@@ -352,9 +353,9 @@ if __name__ == "__main__":
         trainacc_dec_all.append(trainacc)
         
         ## To maintain the normal log print
-        tvloss = (torch.sum(torch.abs(imgrec[:, :, :, :-1] - imgrec[:, :, :, 1:])) + 
-                  torch.sum(torch.abs(imgrec[:, :, :-1, :] - imgrec[:, :, 1:, :])))
-        imgnorm = torch.pow(torch.norm(imgrec, p=6), 6)
+        tvloss = (torch.sum(torch.abs(imgrecs[:, :, :, :-1] - imgrecs[:, :, :, 1:])) + 
+                  torch.sum(torch.abs(imgrecs[:, :, :-1, :] - imgrecs[:, :, 1:, :])))
+        imgnorm = torch.pow(torch.norm(imgrecs, p=6), 6)
         L_alpha = -torch.norm(last_feature, p=1) / last_feature.size(0)
         pred_prob = logits.softmax(dim=1).mean(dim=0)
         L_ie = torch.dot(pred_prob, torch.log(pred_prob)) / args.num_class
@@ -393,11 +394,16 @@ if __name__ == "__main__":
             param.data = ema(name, param.data)
       
       # Save sample images
-      if (not args.use_random_input) and step % args.save_interval == 0:
+      if step % args.save_interval == 0:
         ae.eval()
-        # save some test images
         logprint(("E{:0>%s}S{:0>%s} | Saving image samples" % (num_digit_show_epoch, num_digit_show_step)).format(epoch, step))
-        if args.use_condition:
+        # feature visualization
+        if args.which_lenet == "_2neurons":
+          feat = ae.be.forward_2neurons(imgrecs)
+          save_feat_path = pjoin(rec_img_path, "%s_E%sS%s_feat-visualization.jpg" % (ExpID, epoch, step))
+          feat_visualize(feat.data.cpu().numpy(), label.data.cpu().numpy(), save_feat_path)
+        
+        if args.use_condition:          
           test_codes = torch.randn([args.num_class, args.num_z])
           label_noise = torch.eye(args.num_class) # torch.randn([args.num_class, args.num_class]) 
           test_codes = torch.cat([test_codes, label_noise], dim=1)

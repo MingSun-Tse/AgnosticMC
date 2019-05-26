@@ -4,6 +4,9 @@ import shutil
 import time
 import sys
 pjoin = os.path.join
+from PIL import Image
+import matplotlib; matplotlib.use("Agg")
+import matplotlib.pyplot as plt
 
 class LogPrint():
   def __init__(self, file):
@@ -18,6 +21,18 @@ def check_path(x):
     x = complete_path[0]
   return x
 
+colors  = ["red", "blue", "black", "yellow", "green", "yellowgreen", "gold", "royalblue", "peru", "purple"]
+markers = []
+def feat_visualize(feat, label, save_path):
+  '''
+    feat:  N x 2 # 2-d feature, N: number of examples
+    label: N x 1
+  '''
+  for x, y in zip(feat, label):
+    plt.scatter(x[0], x[1], color=colors[y])
+  plt.savefig(save_path)
+  plt.close()
+  
 def get_previous_step(e2, resume):
   previous_epoch = previous_step = 0
   if e2 and resume:
