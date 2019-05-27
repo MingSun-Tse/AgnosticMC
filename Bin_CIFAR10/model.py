@@ -299,7 +299,7 @@ class DVGG19(nn.Module):
 
 # mimic the net architecture of MNIST deconv
 class DVGG19_deconv(nn.Module):
-  def __init__(self, input_dim, model=None, fixed=False, gray=False, num_divbranch=1):
+  def __init__(self, input_dim, model=None, fixed=False, gray=False, num_divbranch=1, dropout=0):
     super(DVGG19_deconv, self).__init__()
     img_size = 32
     num_channel = 3
@@ -326,7 +326,7 @@ class DVGG19_deconv(nn.Module):
       return img
     
 class DVGG19_aug(nn.Module): # augmented DVGG19
-  def __init__(self, input_dim, model=None, fixed=None, gray=False, num_divbranch=1):
+  def __init__(self, input_dim, model=None, fixed=None, gray=False, num_divbranch=1, dropout=0):
     super(DVGG19_aug, self).__init__()
     self.classifier = nn.Sequential(
       nn.Linear(input_dim, 512),
@@ -424,7 +424,7 @@ class DVGG19_aug(nn.Module): # augmented DVGG19
 ################# MNIST #################
 # ref: https://github.com/eriklindernoren/PyTorch-GAN/blob/master/implementations/dcgan/dcgan.py
 class DLeNet5_deconv(nn.Module):
-  def __init__(self, input_dim, model=None, fixed=False, gray=False, num_divbranch=1):
+  def __init__(self, input_dim, model=None, fixed=False, gray=False, num_divbranch=1, dropout=0):
     super(DLeNet5_deconv, self).__init__()
     img_size = 32
     num_channel = 1
@@ -444,11 +444,15 @@ class DLeNet5_deconv(nn.Module):
         nn.BatchNorm2d(num_channel, 0.8), # Ref: Huawei's paper. They add a BN layer at the end of the generator.
         nn.Tanh(),
     )
+    self.drop = nn.Dropout(p=dropout)
+    self.dropout = dropout
   def forward(self, z):
-      out = self.l1(z)
-      out = out.view(out.shape[0], 128, self.init_size, self.init_size)
-      img = self.conv_blocks(out)
-      return img
+    y = self.l1(z)
+    if self.dropout:
+      y = self.drop(y)
+    y = y.view(y.shape[0], 128, self.init_size, self.init_size)
+    y = self.conv_blocks(y)
+    return y
         
 class DLeNet5_upsample(nn.Module):
   def __init__(self, input_dim, model=None, fixed=False, gray=False, num_divbranch=1):
@@ -493,7 +497,7 @@ class DLeNet5_upsample(nn.Module):
     y = self.tanh(self.bn1(self.conv1(y))) # 1x32x32
     return y
     
-# Use the LeNet model as https://github.com/iRapha/replayed_distillation/blob/master/models/lenet.py
+# ref: https://github.com/iRapha/replayed_distillation/blob/master/models/lenet.py
 class LeNet5(nn.Module):
   def __init__(self, model=None, fixed=False):
     super(LeNet5, self).__init__()
@@ -1023,7 +1027,7 @@ class AutoEncoder_GAN4(nn.Module):
         assert(len(pretrained_model) == 1)
         pretrained_model = pretrained_model[0]
       input_dim = args.num_z + args.num_class if args.use_condition else args.num_z
-      self.__setattr__("d" + str(di), Dec(input_dim, pretrained_model, fixed=False, gray=args.gray, num_divbranch=args.num_divbranch))
+      self.__setattr__("d" + str(di), Dec(input_dim, pretrained_model, fixed=False, gray=args.gray, num_divbranch=args.num_divbranch, dropout=args.dec_dropout))
     
     for sei in range(1, args.num_se + 1):
       self.__setattr__("se" + str(sei), SE(args.e2, fixed=False))

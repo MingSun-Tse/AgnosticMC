@@ -40,7 +40,7 @@ parser.add_argument('--pretrained_timeid',type=str, default=None, help="the time
 parser.add_argument('--num_dec', type=int, default=1)
 parser.add_argument('--num_se', type=int, default=1)
 parser.add_argument('--num_divbranch', type=int, default=1)
-parser.add_argument('--num_epoch', type=int, default=300)
+parser.add_argument('--num_epoch', type=int, default=500)
 parser.add_argument('--num_class', type=int, default=10)
 parser.add_argument('--num_z', type=int, default=100, help="the dimension of hidden z")
 parser.add_argument('--gpu', type=int,   default=0)
@@ -85,6 +85,7 @@ parser.add_argument('--which_lenet', type=str, default="", help="options: '' (de
 parser.add_argument('--deep_lenet5', type=str, default="00", help="'1' means using deep model and '0' means \
 not, such as '11': deep teacher + deep student, '10': deep teacher + shallow student")
 parser.add_argument('--use_condition', action="store_true")
+parser.add_argument('--dec_dropout', type=float, default=0)
 args = parser.parse_args()
 
 # Update and check args
