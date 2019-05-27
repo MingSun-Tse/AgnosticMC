@@ -870,21 +870,32 @@ class Transform2(nn.Module): # drop out
 class Transform4(nn.Module): # rand translation
   def __init__(self):
     super(Transform4, self).__init__()
-    self.conv_trans = nn.Conv2d(3, 3, kernel_size=(5, 5), stride=(1, 1), padding=(2, 2), bias=False, groups=3)
-    self.one_hot2 = OneHotCategorical(torch.Tensor([1/24., 1/24., 1/24., 1/24., 1/24.,
-                                                    1/24., 1/24., 1/24., 1/24., 1/24.,
-                                                    1/24., 1/24., 0.000, 1/24., 1/24.,
-                                                    1/24., 1/24., 1/24., 1/24., 1/24.,
-                                                    1/24., 1/24., 1/24., 1/24., 1/24.]))
+    self.conv1_c1 = nn.Conv2d(1, 1, kernel_size=(5, 5), stride=(1, 1), padding=(2, 2), bias=False, groups=1)
+    self.conv1_c3 = nn.Conv2d(3, 3, kernel_size=(5, 5), stride=(1, 1), padding=(2, 2), bias=False, groups=3)
+    self.one_hot = OneHotCategorical(torch.Tensor([1/24., 1/24., 1/24., 1/24., 1/24.,
+                                                   1/24., 1/24., 1/24., 1/24., 1/24.,
+                                                   1/24., 1/24., 0.000, 1/24., 1/24.,
+                                                   1/24., 1/24., 1/24., 1/24., 1/24.,
+                                                   1/24., 1/24., 1/24., 1/24., 1/24.]))
   def forward(self, x):
-    kernel = self.one_hot2.sample().view(1,5,5) # 1x5x5
-    kernel = torch.stack([kernel] * 3).cuda() # 3x1x5x5
-    self.conv_trans.weight = nn.Parameter(kernel)
-    y = self.conv_trans(x)
-    self.conv_trans.requires_grad = False
-    return y
+    kernel = self.one_hot.sample().view(1,5,5) # 1x5x5
+    if x.size(1) == 1:
+      kernel_c1 = kernel.view(1,1,5,5).cuda()
+      self.conv1_c1.weight = nn.Parameter(kernel_c1)
+      y = self.conv1_c1(x)
+      self.conv1_c1.requires_grad = False
+      return y
+    else:
+      kernel_c3 = torch.stack([kernel] * 3).cuda() # 3x1x5x5
+      self.conv1_c3.weight = nn.Parameter(kernel_c3)
+      y = self.conv1_c3(x)
+      self.conv1_c3.requires_grad = False
+      return y
     
 class Transform6(nn.Module): # resize or scale
+  """
+    Note: the image size is 32x32. Otherwise, this func may need redesign.
+  """
   def __init__(self):
     super(Transform6, self).__init__()
   def forward(self, x):
@@ -916,17 +927,25 @@ class Transform7(nn.Module): # rotate
 class Transform9(nn.Module): # sharpen
   def __init__(self):
     super(Transform9, self).__init__()
-    self.conv1 = nn.Conv2d(3, 3, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1), bias=False, groups=3)
     kernel = [[-1, -1, -1], 
               [-1,  9, -1], 
               [-1, -1, -1]]
     kernel = torch.from_numpy(np.array(kernel)).float().view(1,3,3)
-    kernel = torch.stack([kernel] * 3).cuda()
-    self.conv1.weight = nn.Parameter(kernel)
-    self.conv1.requires_grad = False
+    
+    self.conv1_c1 = nn.Conv2d(1, 1, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1), bias=False, groups=1)
+    self.conv1_c3 = nn.Conv2d(3, 3, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1), bias=False, groups=3)
+    kernel_c1 = kernel.view(1,1,3,3).cuda()
+    kernel_c3 = torch.stack([kernel] * 3).cuda()
+    self.conv1_c1.weight = nn.Parameter(kernel_c1)
+    self.conv1_c3.weight = nn.Parameter(kernel_c3)
+    self.conv1_c1.requires_grad = False
+    self.conv1_c3.requires_grad = False
   
   def forward(self, x):
-    return self.conv1(x)
+    if x.size(1) == 1:
+      return self.conv1_c1(x)
+    else:
+      return self.conv1_c3(x)
     
 class Transform10(nn.Module): # smooth
   def __init__(self):
@@ -935,13 +954,21 @@ class Transform10(nn.Module): # smooth
               [2, 4, 1],
               [1, 2, 1]] # Gaussian smoothing
     kernel = torch.from_numpy(np.array(kernel)).float().view(1,3,3) * 0.0625
-    kernel = torch.stack([kernel] * 3).cuda()
-    self.conv1 = nn.Conv2d(3, 3, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1), bias=False, groups=3)
-    self.conv1.weight = nn.Parameter(kernel)
-    self.conv1.requires_grad = False
+    
+    kernel_c1 = kernel.view(1,1,3,3).cuda()
+    kernel_c3 = torch.stack([kernel] * 3).cuda()
+    self.conv1_c1 = nn.Conv2d(3, 1, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1), bias=False, groups=1)
+    self.conv1_c3 = nn.Conv2d(3, 3, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1), bias=False, groups=3)
+    self.conv1_c1.weight = nn.Parameter(kernel_c1)
+    self.conv1_c3.weight = nn.Parameter(kernel_c3)
+    self.conv1_c1.requires_grad = False
+    self.conv1_c3.requires_grad = False
   
   def forward(self, x):
-    return self.conv1(x)
+    if x.size(1) == 1:
+      return self.conv1_c1(x)
+    else:
+      return self.conv1_c3(x)
     
 class Transform(nn.Module): # random transform combination
   def __init__(self):
