@@ -673,15 +673,15 @@ class DLeNet5_deconv_Random(nn.Module):
         nn.LeakyReLU(0.2, inplace=True),
     )
     self.conv_blocks2 = nn.Sequential(
-        nn.Conv2d(64, 3, 3, stride=1, padding=1), # 1 -> 10
-        nn.BatchNorm2d(3, 0.8),
+        nn.Conv2d(64, 1, 3, stride=1, padding=1), # 1 -> 10
+        nn.BatchNorm2d(1, 0.8),
         nn.Tanh(),
     )
   def forward(self, z):
     y = self.l1(z)
     y = y.view(y.shape[0], 128, self.init_size, self.init_size)
     y = self.conv_blocks1(y); c1 = torch.randperm(70)[:64]; y = y[:,c1,:,:]
-    y = self.conv_blocks2(y); c2 = torch.randperm( 3)[: 1]; y = y[:,c2,:,:]
+    y = self.conv_blocks2(y); # c2 = torch.randperm( 3)[: 1]; y = y[:,c2,:,:]
     return y
     
 class DLeNet5_upsample(nn.Module):
