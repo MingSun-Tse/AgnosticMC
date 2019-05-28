@@ -594,6 +594,33 @@ class Generator(nn.Module):
   def forward(self, z):
       return self.layers(z)
 
+class Generator_Random(nn.Module):
+  def __init__(self, input_dim, model=None, fixed=False, gray=False, num_divbranch=1, dropout=0):
+    super(Generator_Random, self).__init__()
+    self.layers1 = nn.Sequential(
+      nn.Linear(input_dim, 128 * 10**2),
+      View((-1, 128, 10, 10)),
+      nn.BatchNorm2d(128),
+
+      nn.Upsample(scale_factor=1.6),
+      nn.Conv2d(128, 128, 3, stride=1, padding=1),
+      nn.BatchNorm2d(128),
+      nn.LeakyReLU(0.2, inplace=True),
+      
+      nn.Upsample(scale_factor=2),
+      nn.Conv2d(128, 96, 3, stride=1, padding=1), # 64 -> 96
+      nn.BatchNorm2d(96),
+      nn.LeakyReLU(0.2, inplace=True),
+    )
+    self.layers2 = nn.Sequential(
+        nn.Conv2d(64, 32, 3, stride=1, padding=1), # 3 -> 32
+        nn.BatchNorm2d(32, affine=False),
+    )
+  def forward(self, y):
+      y = self.layers1(y); c1 = torch.randperm(96)[:64]; y = y[:,c1,:,:]
+      y = self.layers2(y); c2 = torch.randperm(32)[: 3]; y = y[:,c2,:,:]
+      return y
+      
 ################# MNIST #################
 # ref: https://github.com/eriklindernoren/PyTorch-GAN/blob/master/implementations/dcgan/dcgan.py
 class DLeNet5_deconv(nn.Module):
@@ -1090,7 +1117,7 @@ class AutoEncoder_GAN4(nn.Module):
   def __init__(self, args):
     super(AutoEncoder_GAN4, self).__init__()
     if args.dataset == "CIFAR10":
-      BE = WideResNet; Dec = Generator; SE = WideResNet_SE # converge!
+      BE = WideResNet; Dec = Generator_Random; SE = WideResNet_SE # converge!
       # BE = VGG19; Dec = Generator; SE = WideResNet_SE # converge! 
       # BE = WideResNet; Dec = Generator; SE = SmallVGG19 # TODO-@mingsuntse-20190528: this cannot converge, still don't know why.
       self.normalize = Normalize_CIFAR10()

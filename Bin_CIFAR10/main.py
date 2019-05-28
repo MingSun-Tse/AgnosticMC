@@ -432,7 +432,7 @@ if __name__ == "__main__":
         format_str1 = "E{:0>%s}S{:0>%s}" % (num_digit_show_epoch, num_digit_show_step)
         format_str2 = " | dec:" + " {:.3f}({:.3f})" * args.num_dec * args.num_divbranch
         format_str3 = " | se:" + " {:.3f}({:.3f}) {:.3f}" * args.num_dec * args.num_divbranch 
-        format_str4 = " | tv: {:.3f} norm: {:.3f} L_alpha: {:.3f} L_ie: {:.3f} actimax: {:.3f}"
+        format_str4 = " | tv: {:.0f} norm: {:.0f} L_alpha: {:.3f} L_ie: {:.3f} actimax: {:.3f}"
         format_str5 = " ({:.3f}s/step)"
         format_str = "".join([format_str1, format_str2, format_str3, format_str4, format_str5])
         strvalue2 = []; strvalue3 = []
