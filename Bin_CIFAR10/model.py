@@ -613,12 +613,12 @@ class Generator_Random(nn.Module):
       nn.LeakyReLU(0.2, inplace=True),
     )
     self.layers2 = nn.Sequential(
-        nn.Conv2d(64, 50, 3, stride=1, padding=1), # 3 -> 32
-        nn.BatchNorm2d(50, affine=False),
+        nn.Conv2d(64, 3, 3, stride=1, padding=1), # 3 -> 32
+        nn.BatchNorm2d(3, affine=False),
     )
   def forward(self, y):
       y = self.layers1(y); c1 = torch.randperm(96)[:64]; y = y[:,c1,:,:]
-      y = self.layers2(y); c2 = torch.randperm(50)[: 3]; y = y[:,c2,:,:]
+      y = self.layers2(y); # c2 = torch.randperm(50)[: 3]; y = y[:,c2,:,:]
       return y
       
 ################# MNIST #################
