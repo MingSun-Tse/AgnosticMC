@@ -86,6 +86,8 @@ parser.add_argument('--deep_lenet5', type=str, default="00", help="'1' means usi
 not, such as '11': deep teacher + deep student, '10': deep teacher + shallow student")
 parser.add_argument('--use_condition', action="store_true")
 parser.add_argument('--dec_dropout', type=float, default=0)
+parser.add_argument('--nDec', type=int, default=1)
+parser.add_argument('--nSE', type=int, default=5)
 args = parser.parse_args()
 
 # Update and check args
@@ -195,119 +197,120 @@ if __name__ == "__main__":
         for di in range(1, args.num_dec + 1):
           # Set up model and ema
           dec = eval("ae.d" + str(di)); optimizer_d = optimizer_dec[di - 1]; ema_d = ema_dec[di - 1]
-          total_loss_dec = 0
+          for _ in range(args.nDec):
+            total_loss_dec = 0
+            
+            # Forward
+            imgrecs = dec(x)
+            
+            ## Diversity encouraging loss: MSGAN
+            # ref: 2019 CVPR Mode Seeking Generative Adversarial Networks for Diverse Image Synthesis
+            if args.lw_msgan:
+              imgrecs_1, imgrecs_2 = torch.split(imgrecs, half_bs, dim=0)
+              lz_pixel = torch.mean(torch.abs(imgrecs_1 - imgrecs_2)) / torch.mean(torch.abs(random_z1 - random_z2))
+              total_loss_dec += -args.lw_msgan * lz_pixel
 
-          # Forward
-          imgrecs = dec(x)
-          
-          ## Diversity encouraging loss: MSGAN
-          # ref: 2019 CVPR Mode Seeking Generative Adversarial Networks for Diverse Image Synthesis
-          if args.lw_msgan:
-            imgrecs_1, imgrecs_2 = torch.split(imgrecs, half_bs, dim=0)
-            lz_pixel = torch.mean(torch.abs(imgrecs_1 - imgrecs_2)) / torch.mean(torch.abs(random_z1 - random_z2))
-            total_loss_dec += -args.lw_msgan * lz_pixel
-
-          imgrecs_split = torch.split(imgrecs, num_channel, dim=1)
-          for imgrec in imgrecs_split:
-            # forward
-            imgrec_all.append(imgrec.detach()) # for the following SE training
-            feats = ae.be.forward_branch(imgrec)
-            logits = feats[-1]
-            last_feature = feats[-2] # DFL paper
-            logits_all.append(logits.detach())
-            if not args.use_condition:
-              label = logits.argmax(dim=1).detach()
+            imgrecs_split = torch.split(imgrecs, num_channel, dim=1)
+            for imgrec in imgrecs_split:
+              # forward
+              imgrec_all.append(imgrec.detach()) # for the following SE training
+              feats = ae.be.forward_branch(imgrec)
+              logits = feats[-1]
+              last_feature = feats[-2] # DFL paper
+              logits_all.append(logits.detach())
+              if not args.use_condition:
+                label = logits.argmax(dim=1).detach()
+              
+              ## use msgan idea on the feature
+              if args.lw_msgan and args.lw_msgan_feat:
+                for i in range(len(feats) - 2):
+                  fs = feats[i]
+                  fs_1, fs_2 = torch.split(fs, half_bs, dim=0)
+                  lz_feat = torch.mean(torch.abs(fs_1 - fs_2)) / torch.mean(torch.abs(random_z1 - random_z2))
+                  total_loss_dec += -args.lw_msgan_feat * lz_feat
+              
+              ## Low-level natural image prior: tv + image norm
+              # ref: 2015 CVPR Understanding Deep Image Representations by Inverting Them
+              tvloss = (torch.sum(torch.abs(imgrec[:, :, :, :-1] - imgrec[:, :, :, 1:])) + 
+                        torch.sum(torch.abs(imgrec[:, :, :-1, :] - imgrec[:, :, 1:, :])))
+              if args.lw_tv: total_loss_dec += tvloss * args.lw_tv
+              imgnorm = torch.pow(torch.norm(imgrec, p=6), 6)
+              if args.lw_norm: total_loss_dec += imgnorm * args.lw_norm
+              
+              ## Classification loss, or hard-target loss in KD
+              # pred = logits.detach().max(1)[1] ## TODO: new idea to impl.
+              # pred.eq(label.view_as(pred))
+              hardloss = nn.CrossEntropyLoss()(logits, label)
+              hardloss_dec_all.append(hardloss.item())
+              if args.lw_hard_dec: total_loss_dec += hardloss * args.lw_hard_dec
+              # for accuracy print
+              pred = logits.detach().max(1)[1]
+              trainacc = pred.eq(label.view_as(pred)).sum().item() / label.size(0)
+              trainacc_dec_all.append(trainacc)
+              
+              ## Data augmentation loss
+              if args.lw_DT:
+                imgrec_DT = ae.defined_trans(imgrec) # DT: defined transform
+                imgrec_DT_all.append(imgrec_DT) # for SE
+                logits_DT = ae.be(imgrec_DT)
+                total_loss_dec += nn.CrossEntropyLoss()(logits_DT, label) * args.lw_DT
+              
+              ## Adversarial loss, combat with SE
+              if args.lw_adv:
+                for sei in range(1, args.num_se + 1):
+                  se = eval("ae.se" + str(sei))
+                  logits_dse = se(imgrec)
+                  total_loss_dec += args.lw_adv / nn.CrossEntropyLoss()(logits_dse, label)
+              
+              ## Activation maximization loss
+              # ref: 2016 IJCV Visualizing Deep Convolutional Neural Networks Using Natural Pre-images
+              actimax_loss = torch.zeros(1)
+              if args.clip_actimax and epoch >= 7:
+                args.lw_actimax = 0
+              if args.lw_actimax:
+                rand_loss_weight = torch.rand_like(logits) * args.noise_magnitude
+                for i in range(logits.size(0)):
+                  rand_loss_weight[i, label[i]] = 1
+                actimax_loss = -torch.dot(logits.flatten(), rand_loss_weight.flatten()) / logits.size(0)
+                actimax_loss_print.append(actimax_loss.item())
+                total_loss_dec += actimax_loss * args.lw_actimax
+              
+              ## DFL
+              # ref: 2019.04 arxiv Data-Free Learning of Student Networks (https://arxiv.org/abs/1904.01186)
+              L_alpha = -torch.norm(last_feature, p=1) / last_feature.size(0)
+              if args.lw_feat_L1_norm: total_loss_dec += L_alpha * args.lw_feat_L1_norm
+              
+              prob = logits.softmax(dim=1)
+              ave_prob = prob.mean(dim=0)
+              L_ie = torch.dot(ave_prob, torch.log(ave_prob)) / args.num_class
+              if args.lw_class_balance: total_loss_dec += L_ie * args.lw_class_balance
+              
+              ## My diversity loss
+              # pred_label = logits.argmax(dim=1)
+              # true_prob = torch.zeros_like(prob); true_prob.copy_(prob)
+              # for i in range(logits.size(0)):
+                # true_prob[i, label[i]] = prob[i, pred_label[i]]
+                # true_prob[i, pred_label[i]] = prob[i, label[i]]
+              # loss_KL = nn.KLDivLoss()(F.log_softmax(logits, dim=1), true_prob.detach())
+              # if args.lw_my_diversity: total_loss_dec += loss_KL * args.lw_my_diversity
             
-            ## use msgan idea on the feature
-            if args.lw_msgan and args.lw_msgan_feat:
-              for i in range(len(feats) - 2):
-                fs = feats[i]
-                fs_1, fs_2 = torch.split(fs, half_bs, dim=0)
-                lz_feat = torch.mean(torch.abs(fs_1 - fs_2)) / torch.mean(torch.abs(random_z1 - random_z2))
-                total_loss_dec += -args.lw_msgan_feat * lz_feat
-            
-            ## Low-level natural image prior: tv + image norm
-            # ref: 2015 CVPR Understanding Deep Image Representations by Inverting Them
-            tvloss = (torch.sum(torch.abs(imgrec[:, :, :, :-1] - imgrec[:, :, :, 1:])) + 
-                      torch.sum(torch.abs(imgrec[:, :, :-1, :] - imgrec[:, :, 1:, :])))
-            if args.lw_tv: total_loss_dec += tvloss * args.lw_tv
-            imgnorm = torch.pow(torch.norm(imgrec, p=6), 6)
-            if args.lw_norm: total_loss_dec += imgnorm * args.lw_norm
-            
-            ## Classification loss, or hard-target loss in KD
-            # pred = logits.detach().max(1)[1] ## TODO: new idea to impl.
-            # pred.eq(label.view_as(pred))
-            hardloss = nn.CrossEntropyLoss()(logits, label)
-            hardloss_dec_all.append(hardloss.item())
-            if args.lw_hard_dec: total_loss_dec += hardloss * args.lw_hard_dec
-            # for accuracy print
-            pred = logits.detach().max(1)[1]
-            trainacc = pred.eq(label.view_as(pred)).sum().item() / label.size(0)
-            trainacc_dec_all.append(trainacc)
-            
-            ## Data augmentation loss
-            if args.lw_DT:
-              imgrec_DT = ae.defined_trans(imgrec) # DT: defined transform
-              imgrec_DT_all.append(imgrec_DT) # for SE
-              logits_DT = ae.be(imgrec_DT)
-              total_loss_dec += nn.CrossEntropyLoss()(logits_DT, label) * args.lw_DT
-            
-            ## Adversarial loss, combat with SE
-            if args.lw_adv:
-              for sei in range(1, args.num_se + 1):
-                se = eval("ae.se" + str(sei))
-                logits_dse = se(imgrec)
-                total_loss_dec += args.lw_adv / nn.CrossEntropyLoss()(logits_dse, label)
-            
-            ## Activation maximization loss
-            # ref: 2016 IJCV Visualizing Deep Convolutional Neural Networks Using Natural Pre-images
-            actimax_loss = torch.zeros(1)
-            if args.clip_actimax and epoch >= 7:
-              args.lw_actimax = 0
-            if args.lw_actimax:
-              rand_loss_weight = torch.rand_like(logits) * args.noise_magnitude
-              for i in range(logits.size(0)):
-                rand_loss_weight[i, label[i]] = 1
-              actimax_loss = -torch.dot(logits.flatten(), rand_loss_weight.flatten()) / logits.size(0)
-              actimax_loss_print.append(actimax_loss.item())
-              total_loss_dec += actimax_loss * args.lw_actimax
-            
-            ## DFL
-            # ref: 2019.04 arxiv Data-Free Learning of Student Networks (https://arxiv.org/abs/1904.01186)
-            L_alpha = -torch.norm(last_feature, p=1) / last_feature.size(0)
-            if args.lw_feat_L1_norm: total_loss_dec += L_alpha * args.lw_feat_L1_norm
-            
-            prob = logits.softmax(dim=1)
-            ave_prob = prob.mean(dim=0)
-            L_ie = torch.dot(ave_prob, torch.log(ave_prob)) / args.num_class
-            if args.lw_class_balance: total_loss_dec += L_ie * args.lw_class_balance
-            
-            ## My diversity loss
-            # pred_label = logits.argmax(dim=1)
-            # true_prob = torch.zeros_like(prob); true_prob.copy_(prob)
-            # for i in range(logits.size(0)):
-              # true_prob[i, label[i]] = prob[i, pred_label[i]]
-              # true_prob[i, pred_label[i]] = prob[i, label[i]]
-            # loss_KL = nn.KLDivLoss()(F.log_softmax(logits, dim=1), true_prob.detach())
-            # if args.lw_my_diversity: total_loss_dec += loss_KL * args.lw_my_diversity
-          
-          dec.zero_grad()
-          total_loss_dec.backward(retain_graph=True)
-          optimizer_d.step()
-          for name, param in dec.named_parameters():
-            if param.requires_grad:
-              param.data = ema_d(name, param.data)
-          # Gradient checking
-          if args.show_interval_gradient and step % args.show_interval_gradient == 0:
-            ave_grad = []
-            for p in dec.named_parameters():
-              layer_name = p[0]
-              if "bias" in layer_name: continue
-              if p[1].grad is not None:
-                ave_grad.append([layer_name, np.average(p[1].grad.abs()) * args.lr, np.average(p[1].data.abs())])
-            ave_grad = ["{:<30} {:.6f}  /  {:.6f}  ({:.10f})\n".format(x[0], x[1], x[2], x[1]/x[2]) for x in ave_grad]
-            ave_grad = "".join(ave_grad)
-            logprint(("E{:0>%s}S{:0>%s} (grad x lr) / weight:\n{}" % (num_digit_show_epoch, num_digit_show_step)).format(epoch, step, ave_grad))
+            dec.zero_grad()
+            total_loss_dec.backward(retain_graph=True)
+            optimizer_d.step()
+            for name, param in dec.named_parameters():
+              if param.requires_grad:
+                param.data = ema_d(name, param.data)
+            # Gradient checking
+            if args.show_interval_gradient and step % args.show_interval_gradient == 0:
+              ave_grad = []
+              for p in dec.named_parameters():
+                layer_name = p[0]
+                if "bias" in layer_name: continue
+                if p[1].grad is not None:
+                  ave_grad.append([layer_name, np.average(p[1].grad.abs()) * args.lr, np.average(p[1].data.abs())])
+              ave_grad = ["{:<30} {:.6f}  /  {:.6f}  ({:.10f})\n".format(x[0], x[1], x[2], x[1]/x[2]) for x in ave_grad]
+              ave_grad = "".join(ave_grad)
+              logprint(("E{:0>%s}S{:0>%s} (grad x lr) / weight:\n{}" % (num_digit_show_epoch, num_digit_show_step)).format(epoch, step, ave_grad))
           
       else:
         imgrecs = torch.randn_like(img).cuda()
@@ -335,34 +338,35 @@ if __name__ == "__main__":
       hardloss_se_all = []; trainacc_se_all = []; softloss_se_all = []
       for sei in range(1, args.num_se + 1):
         se = eval("ae.se" + str(sei)); optimizer = optimizer_se[sei - 1]; ema = ema_se[sei - 1]
-        loss_se = 0
-        for i in range(len(imgrec_all)):
-          logits = se(imgrec_all[i])
-          hardloss = nn.CrossEntropyLoss()(logits, label)
-          if args.lw_hard_se: loss_se += hardloss * args.lw_hard_se # Huawei's paper does not mention using this hard loss for SE
-          hardloss_se_all.append(hardloss.item())
-          # for accuracy print
-          pred = logits.detach().max(1)[1]
-          trainacc = pred.eq(label.view_as(pred)).sum().item() / label.size(0)
-          trainacc_se_all.append(trainacc)
-          
-          # knowledge distillation loss
-          # ref: https://github.com/peterliht/knowledge-distillation-pytorch/blob/master/model/net.py
-          softloss = nn.KLDivLoss()(F.log_softmax(logits/args.temp, dim=1),
-                          F.softmax(logits_all[i]/args.temp, dim=1)) * (args.temp * args.temp)
-          if args.lw_soft: loss_se += softloss * args.lw_soft
-          softloss_se_all.append(softloss.item())
+        for _ in range(args.nSE):
+          loss_se = 0
+          for i in range(len(imgrec_all)):
+            logits = se(imgrec_all[i])
+            hardloss = nn.CrossEntropyLoss()(logits, label)
+            if args.lw_hard_se: loss_se += hardloss * args.lw_hard_se # Huawei's paper does not mention using this hard loss for SE
+            hardloss_se_all.append(hardloss.item())
+            # for accuracy print
+            pred = logits.detach().max(1)[1]
+            trainacc = pred.eq(label.view_as(pred)).sum().item() / label.size(0)
+            trainacc_se_all.append(trainacc)
+            
+            # knowledge distillation loss
+            # ref: https://github.com/peterliht/knowledge-distillation-pytorch/blob/master/model/net.py
+            softloss = nn.KLDivLoss()(F.log_softmax(logits/args.temp, dim=1),
+                            F.softmax(logits_all[i]/args.temp, dim=1)) * (args.temp * args.temp)
+            if args.lw_soft: loss_se += softloss * args.lw_soft
+            softloss_se_all.append(softloss.item())
 
-          if args.lw_DT:
-            logits_DT = se(imgrec_DT_all[i].detach())
-            loss_se += nn.CrossEntropyLoss()(logits_DT, label) * args.lw_DT
+            if args.lw_DT:
+              logits_DT = se(imgrec_DT_all[i].detach())
+              loss_se += nn.CrossEntropyLoss()(logits_DT, label) * args.lw_DT
 
-        se.zero_grad()
-        loss_se.backward()
-        optimizer.step()
-        for name, param in se.named_parameters():
-          if param.requires_grad:
-            param.data = ema(name, param.data)
+          se.zero_grad()
+          loss_se.backward()
+          optimizer.step()
+          for name, param in se.named_parameters():
+            if param.requires_grad:
+              param.data = ema(name, param.data)
       
       # Save sample images
       if step % args.save_interval == 0:
