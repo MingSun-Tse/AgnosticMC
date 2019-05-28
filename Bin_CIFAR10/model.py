@@ -653,7 +653,37 @@ class DLeNet5_deconv(nn.Module):
     y = y.view(y.shape[0], 128, self.init_size, self.init_size)
     y = self.conv_blocks(y)
     return y
-        
+
+class DLeNet5_deconv_Random(nn.Module):
+  def __init__(self, input_dim, model=None, fixed=False, gray=False, num_divbranch=1, dropout=0):
+    super(DLeNet5_deconv_Random, self).__init__()
+    img_size = 32
+    num_channel = 1
+    self.init_size = img_size // 4
+    self.l1 = nn.Sequential(nn.Linear(input_dim, 128 * self.init_size ** 2))
+    self.conv_blocks1 = nn.Sequential(
+        nn.BatchNorm2d(128),
+        nn.Upsample(scale_factor=2),
+        nn.Conv2d(128, 128, 3, stride=1, padding=1),
+        nn.BatchNorm2d(128, 0.8),
+        nn.LeakyReLU(0.2, inplace=True),
+        nn.Upsample(scale_factor=2),
+        nn.Conv2d(128, 96, 3, stride=1, padding=1), # 64 -> 96
+        nn.BatchNorm2d(96, 0.8),
+        nn.LeakyReLU(0.2, inplace=True),
+    )
+    self.conv_blocks2 = nn.Sequential(
+        nn.Conv2d(64, 10, 3, stride=1, padding=1), # 1 -> 10
+        nn.BatchNorm2d(10, 0.8),
+        nn.Tanh(),
+    )
+  def forward(self, z):
+    y = self.l1(z)
+    y = y.view(y.shape[0], 128, self.init_size, self.init_size)
+    y = self.conv_blocks1(y); c1 = torch.randperm(96)[:64]; y = y[:,c1,:,:]
+    y = self.conv_blocks2(y); c2 = torch.randperm(10)[: 1]; y = y[:,c2,:,:]
+    return y
+    
 class DLeNet5_upsample(nn.Module):
   def __init__(self, input_dim, model=None, fixed=False, gray=False, num_divbranch=1):
     super(DLeNet5_upsample, self).__init__()
@@ -915,8 +945,8 @@ class SmallLeNet5(nn.Module):
     y = self.relu(self.fc3(y)); out3 = y
     y = self.relu(self.fc4(y)); out4 = y
     y = self.fc5(y)
-    return out1, out2, out3, out4, y    
-
+    return out1, out2, out3, out4, y
+    
 class SmallLeNet5_deep(nn.Module):
   def __init__(self, model=None, fixed=False):
     super(SmallLeNet5_deep, self).__init__()
@@ -1120,12 +1150,10 @@ class AutoEncoder_GAN4(nn.Module):
       BE = WideResNet; Dec = Generator_Random; SE = WideResNet_SE # converge!
       # BE = VGG19; Dec = Generator; SE = WideResNet_SE # converge! 
       # BE = WideResNet; Dec = Generator; SE = SmallVGG19 # TODO-@mingsuntse-20190528: this cannot converge, still don't know why.
-      self.normalize = Normalize_CIFAR10()
     elif args.dataset == "MNIST":
-      Dec = DLeNet5_deconv
+      Dec = DLeNet5_deconv_Random
       BE = eval("LeNet5" + args.which_lenet)
       SE = eval("SmallLeNet5" + int(args.deep_lenet5[1]) * "_deep")
-      self.normalize = Normalize_MNIST()
     
     self.be = BE(args.e1, fixed=True)
     self.defined_trans = Transform()
