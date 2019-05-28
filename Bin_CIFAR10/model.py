@@ -79,22 +79,23 @@ def recreate_image(im_as_var):
     recreated_im = np.uint8(recreated_im).transpose(1, 2, 0)
     return recreated_im
 # ---------------------------------------------------
-cfg = {
+cifar10_vgg_cfg = {
     'A': [64, 'M', 128, 'M', 256, 256, 'M', 512, 512, 'M', 512, 512, 'M'],
     'B': [64, 64, 'M', 128, 128, 'M', 256, 256, 'M', 512, 512, 'M', 512, 512, 'M'],
     'D': [64, 64, 'M', 128, 128, 'M', 256, 256, 256, 'M', 512, 512, 512, 'M', 512, 512, 512, 'M'],
     'E': [64, 64, 'M', 128, 128, 'M', 256, 256, 256, 256, 'M', 512, 512, 512, 512, 'M', 512, 512, 512, 512, 'M'],
-    'SE': [32, 32, 'M', 64, 64, 'M', 128, 128, 128, 128, 'M', 256, 256, 256, 256, 'M', 256, 256, 256, 256, 'M'],
+    'SE_backup': [32, 32, 'M', 64, 64, 'M', 128, 128, 128, 128, 'M', 256, 256, 256, 256, 'M', 256, 256, 256, 256, 'M'],
+    'SE': [32, 32, 'M', 64, 64, 'M', 128, 128, 'M', 256, 256, 'M', 256, 256, 'M'],
     'Dec':       ["Up", 512, 512, "Up", 512, 512, "Up", 256, 256, "Up", 128, 128, "Up", 64, 3],
     'Dec_s':     ["Up", 128, 128, "Up", 128, 128, "Up",  64,  64, "Up",  32,  32, "Up", 16, 3],
     'Dec_s_aug': ["Up", 128, 128, "Up", 128, 128, "Up",  64,  64, "Up", "64-2", "32x-4", "Up", "16x-x", "3x-x"],
     'Dec_gray':  ["Up", 512, 512, "Up", 512, 512, "Up", 256, 256, "Up", 128, 128, "Up", 64, 1],
 }
 
-def make_layers(cfg, batch_norm=False):
+def make_layers(cifar10_vgg_cfg, batch_norm=False):
   layers = []
   in_channels = 3
-  for v in cfg:
+  for v in cifar10_vgg_cfg:
     if v == 'M':
       layers += [nn.MaxPool2d(kernel_size=2, stride=2)]
     else:
@@ -106,10 +107,10 @@ def make_layers(cfg, batch_norm=False):
       in_channels = v
   return nn.Sequential(*layers)
   
-def make_layers_dec(cfg, batch_norm=False):
+def make_layers_dec(cifar10_vgg_cfg, batch_norm=False):
   layers = []
   in_channels = 512
-  for v in cfg:
+  for v in cifar10_vgg_cfg:
     if v == 'Up':
       layers += [nn.UpsamplingNearest2d(scale_factor=2)]
     else: # conv layer
@@ -121,22 +122,22 @@ def make_layers_dec(cfg, batch_norm=False):
         v = int(v.split("-")[0])
       conv2d = nn.Conv2d(in_channels, v, kernel_size=3, padding=1, groups=g)
       if batch_norm:
-        if v == cfg[-1]:
+        if v == cifar10_vgg_cfg[-1]:
           layers += [conv2d, nn.BatchNorm2d(v), nn.Sigmoid()] # normalize output image to [0, 1]
         else: 
           layers += [conv2d, nn.BatchNorm2d(v), nn.ReLU(inplace=True)]
       else:
-        if v == cfg[-1]:
+        if v == cifar10_vgg_cfg[-1]:
           layers += [conv2d, nn.Sigmoid()] # normalize output image to [0, 1]
         else: 
           layers += [conv2d, nn.ReLU(inplace=True)]
       in_channels = v
   return nn.Sequential(*layers)
  
-def make_layers_augdec(cfg, batch_norm=False, num_divbranch=1):
+def make_layers_augdec(cifar10_vgg_cfg, batch_norm=False, num_divbranch=1):
   layers = []
   in_channels = 512
-  for v in cfg:
+  for v in cifar10_vgg_cfg:
     if v == 'Up':
       layers += [nn.UpsamplingNearest2d(scale_factor=2)]
     else: # conv layer
@@ -148,12 +149,12 @@ def make_layers_augdec(cfg, batch_norm=False, num_divbranch=1):
         group = int(group) if group.isdigit() else num_divbranch
       conv2d = nn.Conv2d(in_channels, v, kernel_size=3, padding=1, groups=group)
       if batch_norm:
-        if v == cfg[-1]:
+        if v == cifar10_vgg_cfg[-1]:
           layers += [conv2d, nn.BatchNorm2d(v), nn.Sigmoid()] # normalize output image to [0, 1]
         else: 
           layers += [conv2d, nn.BatchNorm2d(v), nn.ReLU(inplace=True)]
       else:
-        if v == cfg[-1]:
+        if v == cifar10_vgg_cfg[-1]:
           layers += [conv2d, nn.Sigmoid()] # normalize output image to [0, 1]
         else: 
           layers += [conv2d, nn.ReLU(inplace=True)]
@@ -163,7 +164,7 @@ def make_layers_augdec(cfg, batch_norm=False, num_divbranch=1):
 class VGG19(nn.Module):
   def __init__(self, model=None, fixed=None):
     super(VGG19, self).__init__()
-    self.features = make_layers(cfg["E"])
+    self.features = make_layers(cifar10_vgg_cfg["E"])
     self.features = torch.nn.DataParallel(self.features) # model wrapper that enables parallel GPU utilization
     self.classifier = nn.Sequential(
       nn.Dropout(),
@@ -215,16 +216,197 @@ class VGG19(nn.Module):
     x = self.classifier(x)
     y.append(x)
     return y
+
+# ref: https://github.com/polo5/ZeroShotKnowledgeTransfer/blob/master/models/wresnet.py
+class BasicBlock(nn.Module):
+    def __init__(self, in_planes, out_planes, stride, dropRate=0.0):
+        super(BasicBlock, self).__init__()
+        self.bn1 = nn.BatchNorm2d(in_planes)
+        self.relu1 = nn.ReLU(inplace=True)
+        self.conv1 = nn.Conv2d(in_planes, out_planes, kernel_size=3, stride=stride,
+                               padding=1, bias=False)
+        self.bn2 = nn.BatchNorm2d(out_planes)
+        self.relu2 = nn.ReLU(inplace=True)
+        self.conv2 = nn.Conv2d(out_planes, out_planes, kernel_size=3, stride=1,
+                               padding=1, bias=False)
+        self.droprate = dropRate
+        self.equalInOut = (in_planes == out_planes)
+        self.convShortcut = (not self.equalInOut) and nn.Conv2d(in_planes, out_planes, kernel_size=1, stride=stride,
+                               padding=0, bias=False) or None
+    def forward(self, x):
+        if not self.equalInOut:
+            x = self.relu1(self.bn1(x))
+        else:
+            out = self.relu1(self.bn1(x))
+        out = self.relu2(self.bn2(self.conv1(out if self.equalInOut else x)))
+        if self.droprate > 0:
+            out = F.dropout(out, p=self.droprate, training=self.training)
+        out = self.conv2(out)
+        return torch.add(x if self.equalInOut else self.convShortcut(x), out)
+        
+class NetworkBlock(nn.Module):
+    def __init__(self, nb_layers, in_planes, out_planes, block, stride, dropRate=0.0):
+        super(NetworkBlock, self).__init__()
+        self.layer = self._make_layer(block, in_planes, out_planes, nb_layers, stride, dropRate)
+
+    def _make_layer(self, block, in_planes, out_planes, nb_layers, stride, dropRate):
+        layers = []
+        for i in range(int(nb_layers)):
+            layers.append(block(i == 0 and in_planes or out_planes, out_planes, i == 0 and stride or 1, dropRate))
+        return nn.Sequential(*layers)
+
+    def forward(self, x):
+        return self.layer(x)
+        
+class WideResNet(nn.Module):
+    def __init__(self, model=None, fixed=None):
+        # -----------------------------
+        depth = 16
+        num_classes = 10
+        widen_factor = 2
+        dropRate = 0
+        # -----------------------------
+        super(WideResNet, self).__init__()
+        nChannels = [16, 16*widen_factor, 32*widen_factor, 64*widen_factor]
+        assert((depth - 4) % 6 == 0)
+        n = (depth - 4) / 6
+        block = BasicBlock
+        # 1st conv before any network block
+        self.conv1 = nn.Conv2d(3, nChannels[0], kernel_size=3, stride=1,
+                               padding=1, bias=False)
+        # 1st block
+        self.block1 = NetworkBlock(n, nChannels[0], nChannels[1], block, 1, dropRate)
+        # 2nd block
+        self.block2 = NetworkBlock(n, nChannels[1], nChannels[2], block, 2, dropRate)
+        # 3rd block
+        self.block3 = NetworkBlock(n, nChannels[2], nChannels[3], block, 2, dropRate)
+        # global average pooling and classifier
+        self.bn1 = nn.BatchNorm2d(nChannels[3])
+        self.relu = nn.ReLU(inplace=True)
+        self.fc = nn.Linear(nChannels[3], num_classes)
+        self.nChannels = nChannels[3]
+
+        for m in self.modules():
+            if isinstance(m, nn.Conv2d):
+                n = m.kernel_size[0] * m.kernel_size[1] * m.out_channels
+                m.weight.data.normal_(0, math.sqrt(2. / n))
+            elif isinstance(m, nn.BatchNorm2d):
+                m.weight.data.fill_(1)
+                m.bias.data.zero_()
+            elif isinstance(m, nn.Linear):
+                m.bias.data.zero_()
+        
+        if model:
+          checkpoint = torch.load(model)
+          self.load_state_dict(checkpoint["state_dict"])
+        if fixed:
+          for param in self.parameters():
+              param.requires_grad = False
+
+    def forward(self, x):
+        out = self.conv1(x)
+        out = self.block1(out)
+        activation1 = out
+        out = self.block2(out)
+        activation2 = out
+        out = self.block3(out)
+        activation3 = out
+        out = self.relu(self.bn1(out))
+        out = F.avg_pool2d(out, 8)
+        out = out.view(-1, self.nChannels)
+        return self.fc(out)
     
+    def forward_branch(self, x):
+        out = self.conv1(x)
+        out = self.block1(out)
+        activation1 = out
+        out = self.block2(out)
+        activation2 = out
+        out = self.block3(out)
+        activation3 = out
+        out = self.relu(self.bn1(out))
+        out = F.avg_pool2d(out, 8)
+        out = out.view(-1, self.nChannels)
+        return activation3, self.fc(out)
+        
+class WideResNet_SE(nn.Module):
+    def __init__(self, model=None, fixed=None):
+        # -----------------------------
+        depth = 16
+        num_classes = 10
+        widen_factor = 1
+        dropRate = 0
+        # -----------------------------
+        super(WideResNet_SE, self).__init__()
+        nChannels = [16, 16*widen_factor, 32*widen_factor, 64*widen_factor]
+        assert((depth - 4) % 6 == 0)
+        n = (depth - 4) / 6
+        block = BasicBlock
+        # 1st conv before any network block
+        self.conv1 = nn.Conv2d(3, nChannels[0], kernel_size=3, stride=1,
+                               padding=1, bias=False)
+        # 1st block
+        self.block1 = NetworkBlock(n, nChannels[0], nChannels[1], block, 1, dropRate)
+        # 2nd block
+        self.block2 = NetworkBlock(n, nChannels[1], nChannels[2], block, 2, dropRate)
+        # 3rd block
+        self.block3 = NetworkBlock(n, nChannels[2], nChannels[3], block, 2, dropRate)
+        # global average pooling and classifier
+        self.bn1 = nn.BatchNorm2d(nChannels[3])
+        self.relu = nn.ReLU(inplace=True)
+        self.fc = nn.Linear(nChannels[3], num_classes)
+        self.nChannels = nChannels[3]
+
+        for m in self.modules():
+            if isinstance(m, nn.Conv2d):
+                n = m.kernel_size[0] * m.kernel_size[1] * m.out_channels
+                m.weight.data.normal_(0, math.sqrt(2. / n))
+            elif isinstance(m, nn.BatchNorm2d):
+                m.weight.data.fill_(1)
+                m.bias.data.zero_()
+            elif isinstance(m, nn.Linear):
+                m.bias.data.zero_()
+        
+        if model:
+          checkpoint = torch.load(model)
+          self.load_state_dict(checkpoint["state_dict"])
+        if fixed:
+          for param in self.parameters():
+              param.requires_grad = False
+
+    def forward(self, x):
+        out = self.conv1(x)
+        out = self.block1(out)
+        activation1 = out
+        out = self.block2(out)
+        activation2 = out
+        out = self.block3(out)
+        activation3 = out
+        out = self.relu(self.bn1(out))
+        out = F.avg_pool2d(out, 8)
+        out = out.view(-1, self.nChannels)
+        return self.fc(out)
+    
+    def forward_branch(self, x):
+        out = self.conv1(x)
+        out = self.block1(out)
+        activation1 = out
+        out = self.block2(out)
+        activation2 = out
+        out = self.block3(out)
+        activation3 = out
+        out = self.relu(self.bn1(out))
+        out = F.avg_pool2d(out, 8)
+        out = out.view(-1, self.nChannels)
+        return activation3, self.fc(out)
+        
 class SmallVGG19(nn.Module):
   def __init__(self, model=None, fixed=None):
     super(SmallVGG19, self).__init__()
-    self.features = make_layers(cfg["SE"])
+    self.features = make_layers(cifar10_vgg_cfg["SE"])
     self.classifier = nn.Sequential(
-      nn.Dropout(),
       nn.Linear(256, 512),
       nn.ReLU(True),
-      nn.Dropout(),
       nn.Linear(512, 512),
       nn.ReLU(True),
       nn.Linear(512, 10),
@@ -263,7 +445,7 @@ class Normalize_CIFAR10(nn.Module):
     return self.normalize(x)
     
 class DVGG19(nn.Module):
-  def __init__(self, input_dim, model=None, fixed=None, gray=False, num_divbranch=1):
+  def __init__(self, input_dim, model=None, fixed=None, gray=False, num_divbranch=1, dropout=0):
     super(DVGG19, self).__init__()
     self.classifier = nn.Sequential(
       nn.Linear(input_dim, 512),
@@ -274,7 +456,7 @@ class DVGG19(nn.Module):
       nn.ReLU(True),
     )
     self.gray = gray
-    self.features = make_layers_dec(cfg["Dec_gray"]) if gray else make_layers_dec(cfg["Dec_s"], batch_norm=True)
+    self.features = make_layers_dec(cifar10_vgg_cfg["Dec_gray"]) if gray else make_layers_dec(cifar10_vgg_cfg["Dec_s"], batch_norm=True)
 
     if model:
      checkpoint = torch.load(model)
@@ -337,7 +519,7 @@ class DVGG19_aug(nn.Module): # augmented DVGG19
       nn.ReLU(True),
     )
     self.gray = gray
-    self.features = make_layers_augdec(cfg["Dec_s_aug"], True, num_divbranch)
+    self.features = make_layers_augdec(cifar10_vgg_cfg["Dec_s_aug"], True, num_divbranch)
     self.classifier_num_module = len(self.classifier)
     self.features_num_module = len(self.features)
     self.branch_layer = ["c5", "f3", "f10", "f17", "f24", "f31"]
@@ -378,48 +560,39 @@ class DVGG19_aug(nn.Module): # augmented DVGG19
         y.append(x)
     y.append(x)
     return y
-    
-# class DVGG19_deconv(nn.Module):
-  # def __init__(self, input_dim, model=None, fixed=None, gray=False, d=128):
-    # super(DVGG19_deconv, self).__init__()
-    # self.deconv1 = nn.ConvTranspose2d(input_dim, d*4, 4, 1, 0)
-    # self.deconv1_bn = nn.BatchNorm2d(d*4)
-    # self.relu1 = nn.ReLU(True)
-    # self.deconv2 = nn.ConvTranspose2d(d*4, d*2, 4, 2, 1)
-    # self.deconv2_bn = nn.BatchNorm2d(d*2)
-    # self.relu2 = nn.ReLU(True)
-    # self.deconv3 = nn.ConvTranspose2d(d*2, d, 4, 2, 1)
-    # self.deconv3_bn =nn.BatchNorm2d(d)
-    # self.relu3 = nn.ReLU(True)
-    # self.deconv4 = nn.ConvTranspose2d(d, 3, 4, 2, 1)
-    # self.tanh = nn.Tanh()
-    # self.sigm = nn.Sigmoid()
-    
-    # # use upsampling for the last conv layer
-    # self.upscale = nn.UpsamplingNearest2d(scale_factor=2)
-    # self.conv4 = nn.Conv2d(d, 3, 3, 1, 1)
-    
-    # if model:
-     # checkpoint = torch.load(model)
-     # self.load_state_dict(checkpoint)
-    # else:
-      # for m in self.modules():
-        # if isinstance(m, nn.Conv2d):
-          # n = m.kernel_size[0] * m.kernel_size[1] * m.out_channels
-          # m.weight.data.normal_(0, math.sqrt(2. / n))
-          # m.bias.data.zero_()
 
-    # if fixed:
-      # for param in self.parameters():
-          # param.requires_grad = False
-          
-  # def forward(self, x):
-    # x = x.view(x.size(0), x.size(1), 1, 1)           # batch x num_z+num_class x 1 x 1
-    # x = self.relu1(self.deconv1_bn(self.deconv1(x))) # batch x 512 x 4 x 4
-    # x = self.relu2(self.deconv2_bn(self.deconv2(x))) # batch x 256 x 8 x 8
-    # x = self.relu3(self.deconv3_bn(self.deconv3(x))) # batch x 128 x 16 x 16
-    # x = self.sigm(self.deconv4(x))                   # batch x 3 x 32 x 32
-    # return x
+# ZSKT's generator, ref: https://github.com/MingSun-Tse/ZeroShotKnowledgeTransfer/blob/master/models/generator.py
+class View(nn.Module):
+  def __init__(self, size):
+      super(View, self).__init__()
+      self.size = size
+  def forward(self, tensor):
+      return tensor.view(self.size)
+        
+class Generator(nn.Module):
+  def __init__(self, input_dim, model=None, fixed=False, gray=False, num_divbranch=1, dropout=0):
+    super(Generator, self).__init__()
+    self.layers = nn.Sequential(
+      nn.Linear(input_dim, 128 * 10**2),
+      View((-1, 128, 10, 10)),
+      nn.BatchNorm2d(128),
+
+      nn.Upsample(scale_factor=1.6),
+      nn.Conv2d(128, 128, 3, stride=1, padding=1),
+      nn.BatchNorm2d(128),
+      nn.LeakyReLU(0.2, inplace=True),
+
+      nn.Upsample(scale_factor=2),
+      nn.Conv2d(128, 64, 3, stride=1, padding=1),
+      nn.BatchNorm2d(64),
+      nn.LeakyReLU(0.2, inplace=True),
+
+      nn.Conv2d(64, 3, 3, stride=1, padding=1),
+
+      nn.BatchNorm2d(3, affine=False), # This is optional
+  )
+  def forward(self, z):
+      return self.layers(z)
 
 ################# MNIST #################
 # ref: https://github.com/eriklindernoren/PyTorch-GAN/blob/master/implementations/dcgan/dcgan.py
@@ -537,60 +710,6 @@ class LeNet5(nn.Module):
     y = self.relu(self.fc4(y)); out4 = y
     y = self.fc5(y)
     return out2, y
-
-# class LeNet5_deep(nn.Module):
-  # def __init__(self, model=None, fixed=False):
-    # super(LeNet5_deep, self).__init__()
-    # self.fixed = fixed
-    
-    # self.conv1  = nn.Conv2d( 1,  6, kernel_size=(5, 5), stride=(1, 1), padding=(0, 0))
-    # self.pool1  = nn.MaxPool2d(kernel_size=2, stride=2, padding=0)
-    # self.conv11 = nn.Conv2d( 6,  8, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
-    # self.conv12 = nn.Conv2d( 8, 10, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
-    # self.conv13 = nn.Conv2d(10, 12, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
-    # self.conv14 = nn.Conv2d(12, 14, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
-    # self.conv2  = nn.Conv2d(14, 16, kernel_size=(5, 5), stride=(1, 1), padding=(0, 0))
-    # self.pool2  = nn.MaxPool2d(kernel_size=2, stride=2, padding=0)
-    # self.fc3 = nn.Linear(400, 120)
-    # self.fc4 = nn.Linear(120,  84)
-    # self.fc5 = nn.Linear( 84,  10)
-    # self.relu = nn.ReLU(inplace=True)
-    
-    # if model:
-      # self.load_state_dict(torch.load(model))
-    # if fixed:
-      # for param in self.parameters():
-        # param.requires_grad = False
-      
-  # def forward(self, y):          # input: 1x32x32
-    # y = self.relu(self.conv1(y)) # 6x28x28
-    # y = self.pool1(y)            # 6x14x14
-    # y = self.relu(self.conv11(y))
-    # y = self.relu(self.conv12(y))
-    # y = self.relu(self.conv13(y))
-    # y = self.relu(self.conv14(y))
-    # y = self.relu(self.conv2(y)) # 16x10x10
-    # y = self.pool2(y)            # 16x5x5
-    # y = y.view(y.size(0), -1)    # 400
-    # y = self.relu(self.fc3(y))   # 120
-    # y = self.relu(self.fc4(y))   # 84
-    # y = self.fc5(y)              # 10
-    # return y
-    
-  # def forward_branch(self, y):
-    # y = self.relu(self.conv1(y)); out1 = y
-    # y = self.pool1(y)
-    # y = self.relu(self.conv11(y))
-    # y = self.relu(self.conv12(y))
-    # y = self.relu(self.conv13(y))
-    # y = self.relu(self.conv14(y))
-    # y = self.relu(self.conv2(y)); out2 = y
-    # y = self.pool2(y)
-    # y = y.view(y.size(0), -1)
-    # y = self.relu(self.fc3(y)); out3 = y
-    # y = self.relu(self.fc4(y)); out4 = y
-    # y = self.fc5(y)
-    # return out2, y
    
 # The LeNet5 model that has only two neurons in the last FC hidden layer, easy for feature visualization.
 # Take the idea from 2016 ECCV center loss: https://kpzhang93.github.io/papers/eccv2016.pdf
@@ -770,38 +889,6 @@ class SmallLeNet5(nn.Module):
     y = self.relu(self.fc4(y)); out4 = y
     y = self.fc5(y)
     return out1, out2, out3, out4, y    
-
-# class SmallLeNet5_deep(nn.Module):
-  # def __init__(self, model=None, fixed=False):
-    # super(SmallLeNet5_deep, self).__init__()
-    # self.fixed = fixed
-    # self.conv1  = nn.Conv2d(1, 3, kernel_size=(5, 5), stride=(1, 1), padding=(0, 0))
-    # self.pool1  = nn.MaxPool2d(kernel_size=2, stride=2, padding=0)
-    # self.conv11 = nn.Conv2d(3, 4, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
-    # self.conv12 = nn.Conv2d(4, 5, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
-    # self.conv13 = nn.Conv2d(5, 6, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
-    # self.conv14 = nn.Conv2d(6, 7, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
-    # self.conv2  = nn.Conv2d(7, 8, kernel_size=(5, 5), stride=(1, 1), padding=(0, 0))
-    # self.pool2  = nn.MaxPool2d(kernel_size=2, stride=2, padding=0)
-    # self.fc3 = nn.Linear(200, 120)
-    # self.fc4 = nn.Linear(120,  84)
-    # self.fc5 = nn.Linear( 84,  10)
-    # self.relu = nn.ReLU(inplace=True)
-    
-  # def forward(self, y):
-    # y = self.relu(self.conv1(y))
-    # y = self.pool1(y)
-    # y = self.relu(self.conv11(y))
-    # y = self.relu(self.conv12(y))
-    # y = self.relu(self.conv13(y))
-    # y = self.relu(self.conv14(y))
-    # y = self.relu(self.conv2(y))
-    # y = self.pool2(y)
-    # y = y.view(y.size(0), -1)
-    # y = self.relu(self.fc3(y))
-    # y = self.relu(self.fc4(y))
-    # y = self.fc5(y)
-    # return y
 
 class SmallLeNet5_deep(nn.Module):
   def __init__(self, model=None, fixed=False):
@@ -988,7 +1075,7 @@ class Transform(nn.Module): # random transform combination
       if name[0] == "T" and name[1:].isdigit():
         self.transforms.append(eval("self.%s" % name))
     self.transforms = np.array(self.transforms)
-    print(self.transforms)
+    # print(self.transforms)
     
   def forward(self, y):
     rand = np.random.permutation(len(self.transforms))
@@ -1003,7 +1090,9 @@ class AutoEncoder_GAN4(nn.Module):
   def __init__(self, args):
     super(AutoEncoder_GAN4, self).__init__()
     if args.dataset == "CIFAR10":
-      BE = VGG19; Dec = DVGG19_deconv; SE = SmallVGG19
+      BE = WideResNet; Dec = Generator; SE = WideResNet_SE # converge!
+      # BE = VGG19; Dec = Generator; SE = WideResNet_SE # converge! 
+      # BE = WideResNet; Dec = Generator; SE = SmallVGG19 # TODO-@mingsuntse-20190528: this cannot converge, still don't know why.
       self.normalize = Normalize_CIFAR10()
     elif args.dataset == "MNIST":
       Dec = DLeNet5_deconv
@@ -1014,10 +1103,6 @@ class AutoEncoder_GAN4(nn.Module):
     self.be = BE(args.e1, fixed=True)
     self.defined_trans = Transform()
     self.upscale = nn.UpsamplingNearest2d(scale_factor=2)
-    self.bn1 = nn.BatchNorm2d(32)
-    self.bn2 = nn.BatchNorm2d(32)
-    self.bn3 = nn.BatchNorm2d(16)
-    self.bn4 = nn.BatchNorm2d( 3)
     
     for di in range(1, args.num_dec + 1):
       pretrained_model = None
