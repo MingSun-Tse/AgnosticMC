@@ -1147,13 +1147,13 @@ class AutoEncoder_GAN4(nn.Module):
   def __init__(self, args):
     super(AutoEncoder_GAN4, self).__init__()
     if args.dataset == "CIFAR10":
-      BE = WideResNet; Dec = Generator_Random; SE = WideResNet_SE # converge!
+      BE = WideResNet; Dec = eval("Generator" + "_Random" * args.random_dec); SE = WideResNet_SE # converge!
       # BE = VGG19; Dec = Generator; SE = WideResNet_SE # converge! 
       # BE = WideResNet; Dec = Generator; SE = SmallVGG19 # TODO-@mingsuntse-20190528: this cannot converge, still don't know why.
     elif args.dataset == "MNIST":
-      Dec = DLeNet5_deconv_Random
-      BE = eval("LeNet5" + args.which_lenet)
-      SE = eval("SmallLeNet5" + int(args.deep_lenet5[1]) * "_deep")
+      Dec = eval("DLeNet5_deconv" + "_Random" * args.random_dec)
+      BE  = eval("LeNet5" + args.which_lenet)
+      SE  = eval("SmallLeNet5" + int(args.deep_lenet5[1]) * "_deep")
     
     self.be = BE(args.e1, fixed=True)
     self.defined_trans = Transform()

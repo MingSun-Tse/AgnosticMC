@@ -80,14 +80,15 @@ parser.add_argument('--gray', action="store_true")
 parser.add_argument('--noise_magnitude', type=float, default=0)
 parser.add_argument('--CodeID', type=str)
 parser.add_argument('--clip_actimax', action="store_true")
+parser.add_argument('--random_dec', action="store_true")
 parser.add_argument('--dataset', type=str, default="MNIST")
 parser.add_argument('--which_lenet', type=str, default="", help="options: '' (default), '_deep', '_2neurons' ")
 parser.add_argument('--deep_lenet5', type=str, default="00", help="'1' means using deep model and '0' means \
 not, such as '11': deep teacher + deep student, '10': deep teacher + shallow student")
 parser.add_argument('--use_condition', action="store_true")
 parser.add_argument('--dec_dropout', type=float, default=0)
-parser.add_argument('--nDec', type=int, default=1)
-parser.add_argument('--nSE', type=int, default=5)
+parser.add_argument('--n_dec_update', type=int, default=1)
+parser.add_argument('--n_se_update', type=int, default=1)
 args = parser.parse_args()
 
 # Update and check args
@@ -203,7 +204,7 @@ if __name__ == "__main__":
         for di in range(1, args.num_dec + 1):
           # Set up model and ema
           dec = eval("ae.d" + str(di)); optimizer_d = optimizer_dec[di - 1]; ema_d = ema_dec[di - 1]
-          for _ in range(args.nDec):
+          for _ in range(args.n_dec_update):
             total_loss_dec = 0
             
             # Forward
@@ -219,7 +220,6 @@ if __name__ == "__main__":
             imgrecs_split = torch.split(imgrecs, num_channel, dim=1)
             for imgrec in imgrecs_split:
               # forward
-              imgrec_all.append(imgrec.detach()) # for the following SE training
               feats = ae.be.forward_branch(imgrec)
               logits = feats[-1]
               last_feature = feats[-2] # DFL paper
@@ -301,7 +301,7 @@ if __name__ == "__main__":
               # if args.lw_my_diversity: total_loss_dec += loss_KL * args.lw_my_diversity
             
             dec.zero_grad()
-            total_loss_dec.backward(retain_graph=True)
+            total_loss_dec.backward()
             optimizer_d.step()
             for name, param in dec.named_parameters():
               if param.requires_grad:
@@ -341,10 +341,11 @@ if __name__ == "__main__":
         L_ie = torch.dot(pred_prob, torch.log(pred_prob)) / args.num_class
 
       # Update SE
+      imgrec_all.append(ae.d1(x).detach())
       hardloss_se_all = []; trainacc_se_all = []; softloss_se_all = []
       for sei in range(1, args.num_se + 1):
         se = eval("ae.se" + str(sei)); optimizer = optimizer_se[sei - 1]; ema = ema_se[sei - 1]
-        for _ in range(args.nSE):
+        for _ in range(args.n_se_update):
           loss_se = 0
           for i in range(len(imgrec_all)):
             logits = se(imgrec_all[i])
