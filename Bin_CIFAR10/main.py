@@ -67,8 +67,6 @@ parser.add_argument('-p', '--project_name', type=str, default="test")
 parser.add_argument('-r', '--resume', action='store_true')
 parser.add_argument('-m', '--mode', type=str, default="GAN4", help='the training mode name.')
 parser.add_argument('--use_random_input', action="store_true")
-parser.add_argument('--begin', type=float, default=25)
-parser.add_argument('--end',   type=float, default=20)
 parser.add_argument('--temp',  type=float, default=1, help="the tempature in KD")
 parser.add_argument('--adv_train', type=int, default=0)
 parser.add_argument('--ema_factor', type=float, default=0.9, help="exponential moving average") 
@@ -221,9 +219,9 @@ if __name__ == "__main__":
             for imgrec in imgrecs_split:
               # forward
               feats = ae.be.forward_branch(imgrec)
-              logits = feats[-1]
-              last_feature = feats[-2] # DFL paper
-              logits_all.append(logits.detach())
+              logits, last_feature = feats[-1], feats[-2]
+              imgrec_all.append(imgrec.detach()) # for SE training
+              logits_all.append(logits.detach()) # for SE training
               if not args.use_condition:
                 label = logits.argmax(dim=1).detach()
               
@@ -257,7 +255,6 @@ if __name__ == "__main__":
               ## Data augmentation loss
               if args.lw_DT:
                 imgrec_DT = ae.defined_trans(imgrec) # DT: defined transform
-                imgrec_DT_all.append(imgrec_DT) # for SE
                 logits_DT = ae.be(imgrec_DT)
                 total_loss_dec += nn.CrossEntropyLoss()(logits_DT, label) * args.lw_DT
               
@@ -317,12 +314,11 @@ if __name__ == "__main__":
               ave_grad = ["{:<30} {:.6f}  /  {:.6f}  ({:.10f})\n".format(x[0], x[1], x[2], x[1]/x[2]) for x in ave_grad]
               ave_grad = "".join(ave_grad)
               logprint(("E{:0>%s}S{:0>%s} (grad x lr) / weight:\n{}" % (num_digit_show_epoch, num_digit_show_step)).format(epoch, step, ave_grad))
-          
       else:
         imgrecs = torch.randn_like(img).cuda()
-        imgrec_all.append(imgrecs)
         feats = ae.be.forward_branch(imgrecs)
         logits = feats[-1]; last_feature = feats[-2]
+        imgrec_all.append(imgrecs)
         logits_all.append(logits.detach())
         label = logits.argmax(dim=1).detach()
         hardloss = nn.CrossEntropyLoss()(logits, label)
@@ -341,7 +337,9 @@ if __name__ == "__main__":
         L_ie = torch.dot(pred_prob, torch.log(pred_prob)) / args.num_class
 
       # Update SE
-      imgrec_all.append(ae.d1(x).detach())
+      # imgrec = ae.d1(x).detach()
+      # imgrec_all[0] = imgrec
+      # logits_all[0] = ae.be(imgrec) # TODO-@mingsun-tse: why this does not work?
       hardloss_se_all = []; trainacc_se_all = []; softloss_se_all = []
       for sei in range(1, args.num_se + 1):
         se = eval("ae.se" + str(sei)); optimizer = optimizer_se[sei - 1]; ema = ema_se[sei - 1]
