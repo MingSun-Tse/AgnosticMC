@@ -143,7 +143,13 @@ if __name__ == "__main__":
   train_loader, num_train, test_loader, num_test = set_up_data(args.dataset, args.batch_size)
   
   # Print settings after the model and data are set up normally
-  logprint(args._get_kwargs())
+  logprint("Print the args:")
+  args_keys = args.__dict__.keys()
+  args_keys = sorted(args_keys)
+  format_str = "{:>%s}  :  {:<}" % max([len(x) for x in args_keys])
+  for k in args_keys:
+    v = args.__dict__[k]
+    print(format_str.format(k, str(v)), file=log, flush=True)
   
   # Optimizer
   optimizer_se  = []
