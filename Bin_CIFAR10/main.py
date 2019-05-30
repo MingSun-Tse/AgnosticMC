@@ -97,7 +97,7 @@ pretrained_be_path = {
   "CIFAR10"        : "models/model_best.pth.tar",
 }
 assert(args.num_se  == 1)
-assert(args.num_dec == 1)
+# assert(args.num_dec == 1)
 assert(args.mode in AutoEncoders.keys())
 assert(args.dataset in ["MNIST", "CIFAR10"])
 if args.e1 == None:
@@ -255,6 +255,7 @@ if __name__ == "__main__":
               ## Data augmentation loss
               if args.lw_DT:
                 imgrec_DT = ae.defined_trans(imgrec) # DT: defined transform
+                imgrec_DT_all.append(imgrec_DT.detach())
                 logits_DT = ae.be(imgrec_DT)
                 total_loss_dec += nn.CrossEntropyLoss()(logits_DT, label) * args.lw_DT
               
@@ -348,12 +349,26 @@ if __name__ == "__main__":
           for i in range(len(imgrec_all)):
             logits = se(imgrec_all[i])
             hardloss = nn.CrossEntropyLoss()(logits, label)
-            if args.lw_hard_se: loss_se += hardloss * args.lw_hard_se # Huawei's paper does not mention using this hard loss for SE
+            if args.lw_hard_se: loss_se += hardloss * args.lw_hard_se # DFL does not mention using this hard loss for SE
             hardloss_se_all.append(hardloss.item())
             # for accuracy print
             pred = logits.detach().max(1)[1]
             trainacc = pred.eq(label.view_as(pred)).sum().item() / label.size(0)
             trainacc_se_all.append(trainacc)
+            
+            # print accuracy of each class
+            if step % args.show_interval == 0:
+              right_wrt_label = [0] * args.num_class
+              cnt_wrt_label = [0] * args.num_class
+              for kk in range(args.batch_size):
+                true_label = label[kk]
+                cnt_wrt_label[true_label] += 1
+                if true_label == logits[kk].argmax():
+                  right_wrt_label[true_label] += 1
+              acc_str = "acc_wrt_label: "
+              for kk in range(args.num_class):
+                acc_str += "%d: %.3f  " % (kk, right_wrt_label[kk] / cnt_wrt_label[kk])
+              logprint(acc_str)
             
             # knowledge distillation loss
             # ref: https://github.com/peterliht/knowledge-distillation-pytorch/blob/master/model/net.py
@@ -363,7 +378,7 @@ if __name__ == "__main__":
             softloss_se_all.append(softloss.item())
 
             if args.lw_DT:
-              logits_DT = se(imgrec_DT_all[i].detach())
+              logits_DT = se(imgrec_DT_all[i])
               loss_se += nn.CrossEntropyLoss()(logits_DT, label) * args.lw_DT
 
           se.zero_grad()
