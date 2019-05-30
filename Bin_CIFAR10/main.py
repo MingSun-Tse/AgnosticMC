@@ -176,7 +176,7 @@ if __name__ == "__main__":
 
       if not args.use_random_input:
         # Generate codes randomly
-        if args.lw_msgan:
+        if args.lw_msgan or args.lw_msgan_feat:
           half_bs = int(args.batch_size / 2)
           random_z1 = torch.randn(half_bs, args.num_z).cuda()
           random_z2 = torch.randn(half_bs, args.num_z).cuda()
@@ -226,7 +226,7 @@ if __name__ == "__main__":
                 label = logits.argmax(dim=1).detach()
               
               ## use msgan idea on the feature
-              if args.lw_msgan and args.lw_msgan_feat:
+              if args.lw_msgan_feat:
                 for i in range(len(feats) - 2):
                   fs = feats[i]
                   fs_1, fs_2 = torch.split(fs, half_bs, dim=0)
