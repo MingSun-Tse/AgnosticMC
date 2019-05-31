@@ -758,7 +758,8 @@ class LeNet5(nn.Module):
     return y
   
   def forward_branch(self, y):
-    y = self.relu(self.conv1(y)); out1 = y
+    y = self.conv1(y); out1 = y
+    y = self.relu(y)
     y = self.pool1(y)
     y = self.relu(self.conv2(y)); out2 = y
     y = self.pool2(y)
@@ -766,7 +767,7 @@ class LeNet5(nn.Module):
     y = self.relu(self.fc3(y)); out3 = y
     y = self.relu(self.fc4(y)); out4 = y
     y = self.fc5(y)
-    return out4, out2, y
+    return out1, out2, y
    
 # The LeNet5 model that has only two neurons in the last FC hidden layer, easy for feature visualization.
 # Take the idea from 2016 ECCV center loss: https://kpzhang93.github.io/papers/eccv2016.pdf
