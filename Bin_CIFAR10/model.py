@@ -765,9 +765,10 @@ class LeNet5(nn.Module):
     y = self.pool2(y)
     y = y.view(y.size(0), -1)
     y = self.relu(self.fc3(y)); out3 = y
-    y = self.relu(self.fc4(y)); out4 = y
+    y = self.fc4(y); out4 = y
+    y = self.relu(y)
     y = self.fc5(y)
-    return out1, out2, y
+    return out1, out4, out2, y
    
 # The LeNet5 model that has only two neurons in the last FC hidden layer, easy for feature visualization.
 # Take the idea from 2016 ECCV center loss: https://kpzhang93.github.io/papers/eccv2016.pdf
