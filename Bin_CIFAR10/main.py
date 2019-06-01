@@ -94,7 +94,7 @@ pretrained_be_path = {
   "MNIST"          : "train_baseline_lenet5/trained_weights2/w*/*E17S0*.pth",
   "MNIST_deep"     : "train_baseline_lenet5/trained_weights_verydeep/w*/*E16S0*.pth", #"train_baseline_lenet5/trained_weights_deep/w*/*E19S0*.pth",
   "MNIST_2neurons" : "train_baseline_lenet5/trained_weights_*2neurons/w*/*E21S0*.pth",
-  "CIFAR10"        : "models/model_best.pth.tar",
+  "CIFAR10"        : "../../ZeroShot*/Pretrained/CIFAR10/WRN-16-2/last.pth.tar", # "models/model_best.pth.tar",
 }
 assert(args.num_se  == 1)
 # assert(args.num_dec == 1)
