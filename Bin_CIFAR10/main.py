@@ -66,7 +66,7 @@ parser.add_argument('-b', '--batch_size', type=int, default=600) # 256)
 parser.add_argument('-p', '--project_name', type=str, default="test")
 parser.add_argument('-r', '--resume', action='store_true')
 parser.add_argument('-m', '--mode', type=str, default="GAN4", help='the training mode name.')
-parser.add_argument('--use_random_input', action="store_true")
+parser.add_argument('--input', type=str, default="pseudo_image")
 parser.add_argument('--temp',  type=float, default=1, help="the tempature in KD")
 parser.add_argument('--adv_train', type=int, default=0)
 parser.add_argument('--ema_factor', type=float, default=0.9, help="exponential moving average") 
@@ -97,13 +97,13 @@ pretrained_be_path = {
   "CIFAR10"        : "../../ZeroShot*/Pretrained/CIFAR10/WRN-16-2/last.pth.tar", # "models/model_best.pth.tar",
 }
 assert(args.num_se  == 1)
-# assert(args.num_dec == 1)
+assert(args.num_dec == 1)
 assert(args.mode in AutoEncoders.keys())
-assert(args.dataset in ["MNIST", "CIFAR10"])
+assert(args.dataset in ["MNIST", "CIFAR10", "CIFAR100"])
 if args.e1 == None:
-  if args.dataset == "CIFAR10":
-    args.e1 = pretrained_be_path[args.dataset]
-  else:
+  if "CIFAR" in args.dataset:
+    args.e1 = pretrained_be_path["CIFAR10"]
+  elif args.dataset == "MNIST":
     key = "MNIST" + args.which_lenet
     args.e1 = pretrained_be_path[key]
 args.e1 = check_path(args.e1)
@@ -173,8 +173,8 @@ if __name__ == "__main__":
       ae.train()
       imgrec_all = []; logits_all = []; imgrec_DT_all = []; hardloss_dec_all = []; trainacc_dec_all = []
       actimax_loss_print = []
-
-      if not args.use_random_input:
+      
+      if args.input == "pseudo_image":
         # Generate codes randomly
         if args.lw_msgan or args.lw_msgan_feat:
           half_bs = int(args.batch_size / 2)
@@ -316,7 +316,13 @@ if __name__ == "__main__":
               ave_grad = "".join(ave_grad)
               logprint(("E{:0>%s}S{:0>%s} (grad x lr) / weight:\n{}" % (num_digit_show_epoch, num_digit_show_step)).format(epoch, step, ave_grad))
       else:
-        imgrecs = torch.randn_like(img).cuda()
+        if args.input == "random_noise":
+          imgrecs = torch.randn_like(img).cuda()
+        elif args.input == "alternative_data":
+          imgrecs = img.cuda()
+        else:
+          logprint("Error: Wrong '--input' arg, please check, exited.")
+          exit(1)
         feats = ae.be.forward_branch(imgrecs)
         logits = feats[-1]; last_feature = feats[-2]
         imgrec_all.append(imgrecs)
