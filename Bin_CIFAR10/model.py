@@ -583,7 +583,6 @@ class Generator(nn.Module):
 
       nn.Conv2d(64, 3, 3, stride=1, padding=1),
       nn.BatchNorm2d(3, affine=False), # This is optional
-      nn.Tanh(),
   )
   # rewrite the layers for forward_branch
   
