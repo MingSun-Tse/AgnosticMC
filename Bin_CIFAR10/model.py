@@ -583,6 +583,7 @@ class Generator(nn.Module):
 
       nn.Conv2d(64, 3, 3, stride=1, padding=1),
       nn.BatchNorm2d(3, affine=False), # This is optional
+      nn.Tanh(),
   )
   # rewrite the layers for forward_branch
   
@@ -1183,7 +1184,7 @@ class AutoEncoder_GAN4(nn.Module):
   def __init__(self, args):
     super(AutoEncoder_GAN4, self).__init__()
     if "CIFAR" in args.dataset:
-      BE = WideResNet_16_2; DecDec = eval("Generator" + "_Random" * args.random_dec); SE = WideResNet_16_1 # converge!
+      BE = WideResNet_16_2; Dec = eval("Generator" + "_Random" * args.random_dec); SE = WideResNet_16_1 # converge!
       # BE = VGG19; Dec = Generator; SE = WideResNet_SE # converge! 
       # BE = WideResNet; Dec = Generator; SE = SmallVGG19 # TODO-@mingsuntse-20190528: this cannot converge, still don't know why.
     elif args.dataset == "MNIST":
