@@ -582,11 +582,17 @@ class Generator(nn.Module):
       nn.LeakyReLU(0.2, inplace=True),
 
       nn.Conv2d(64, 3, 3, stride=1, padding=1),
-
       nn.BatchNorm2d(3, affine=False), # This is optional
   )
+  # rewrite the layers for forward_branch
+  
+  
   def forward(self, z):
-      return self.layers(z)
+    return self.layers(z)
+  
+  def forward_branch(self, z):
+    pass
+    
 
 class Generator_Random(nn.Module):
   def __init__(self, input_dim, model=None, fixed=False, gray=False, num_divbranch=1, dropout=0):
@@ -630,16 +636,40 @@ class DLeNet5_deconv(nn.Module):
         nn.Conv2d(128, 128, 3, stride=1, padding=1),
         nn.BatchNorm2d(128, 0.8),
         nn.LeakyReLU(0.2, inplace=True),
+        
         nn.Upsample(scale_factor=2),
         nn.Conv2d(128, 64, 3, stride=1, padding=1),
         nn.BatchNorm2d(64, 0.8),
         nn.LeakyReLU(0.2, inplace=True),
+        
         nn.Conv2d(64, num_channel, 3, stride=1, padding=1),
         nn.BatchNorm2d(num_channel, 0.8), # Ref: Huawei's paper. They add a BN layer at the end of the generator.
         nn.Tanh(),
     )
+    
+    # Rewrite conv_blocks above, for forward_branch
+    self.conv1 = nn.Sequential(
+         nn.BatchNorm2d(128),
+         nn.Upsample(scale_factor=2),
+         nn.Conv2d(128, 128, 3, stride=1, padding=1),
+         nn.BatchNorm2d(128, 0.8),
+         nn.LeakyReLU(0.2, inplace=True),
+    )
+    self.conv2 = nn.Sequential(
+        nn.Upsample(scale_factor=2), 
+        nn.Conv2d(128, 64, 3, stride=1, padding=1),
+        nn.BatchNorm2d(64, 0.8),
+        nn.LeakyReLU(0.2, inplace=True),
+    )
+    self.conv3 = nn.Sequential(
+        nn.Conv2d(64, num_channel, 3, stride=1, padding=1),
+        nn.BatchNorm2d(num_channel, 0.8),
+        nn.Tanh(),
+    )
+
     self.drop = nn.Dropout(p=dropout)
     self.dropout = dropout
+  
   def forward(self, z):
     y = self.l1(z)
     if self.dropout:
@@ -647,6 +677,16 @@ class DLeNet5_deconv(nn.Module):
     y = y.view(y.shape[0], 128, self.init_size, self.init_size)
     y = self.conv_blocks(y)
     return y
+  
+  def forward_branch(self, z):
+    y = self.l1(z)
+    if self.dropout:
+      y = self.drop(y)
+    y = y.view(y.shape[0], 128, self.init_size, self.init_size)
+    out1 = self.conv1(y)
+    out2 = self.conv2(out1)
+    out3 = self.conv3(out2)
+    return out1, out2, out3
 
 class DLeNet5_deconv_Random(nn.Module):
   def __init__(self, input_dim, model=None, fixed=False, gray=False, num_divbranch=1, dropout=0):
@@ -1143,7 +1183,7 @@ class AutoEncoder_GAN4(nn.Module):
   def __init__(self, args):
     super(AutoEncoder_GAN4, self).__init__()
     if "CIFAR" in args.dataset:
-      BE = WideResNet_16_2; Dec = eval("Generator" + "_Random" * args.random_dec); SE = WideResNet_16_1 # converge!
+      BE = WideResNet_16_2; DecDec = eval("Generator" + "_Random" * args.random_dec); SE = WideResNet_16_1 # converge!
       # BE = VGG19; Dec = Generator; SE = WideResNet_SE # converge! 
       # BE = WideResNet; Dec = Generator; SE = SmallVGG19 # TODO-@mingsuntse-20190528: this cannot converge, still don't know why.
     elif args.dataset == "MNIST":

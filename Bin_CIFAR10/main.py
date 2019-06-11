@@ -59,6 +59,7 @@ parser.add_argument('--lw_adv',  type=float, default=0)
 parser.add_argument('--lw_actimax',  type=float, default=0)
 parser.add_argument('--lw_msgan',  type=float, default=1e-30) # 100)
 parser.add_argument('--lw_msgan_feat',  type=float, default=0) # 100)
+parser.add_argument('--lw_msgan_decfeat',  type=float, default=0) # 100)
 parser.add_argument('--lw_feat_L1_norm', type=float, default=0, help="ref to DFL paper")
 parser.add_argument('--lw_class_balance', type=float, default=1000, help="ref to DFL paper")
 # ----------------------------------------------------------------
@@ -206,14 +207,25 @@ if __name__ == "__main__":
             total_loss_dec = 0
             
             # Forward
-            imgrecs = dec(x)
+            if args.lw_msgan_decfeat:
+              *dec_feats, imgrecs = dec.forward_branch(x)
+            else:
+              imgrecs = dec(x)
             
             ## Diversity encouraging loss: MSGAN
             # ref: 2019 CVPR Mode Seeking Generative Adversarial Networks for Diverse Image Synthesis
+            # https://github.com/HelenMao/MSGAN
             if args.lw_msgan:
               imgrecs_1, imgrecs_2 = torch.split(imgrecs, half_bs, dim=0)
               lz_pixel = torch.mean(torch.abs(imgrecs_1 - imgrecs_2)) / torch.mean(torch.abs(random_z1 - random_z2))
               total_loss_dec += -args.lw_msgan * lz_pixel
+            
+            # apply msgan to the feature of decoder
+            if args.lw_msgan_decfeat:
+              for feat in dec_feats:
+                f1, f2 = torch.split(feat, half_bs, dim=0)
+                lz_dec_feat = torch.mean(torch.abs(f1 - f2)) / torch.mean(torch.abs(random_z1 - random_z2))
+                total_loss_dec += -args.lw_msgan_decfeat * lz_dec_feat
 
             imgrecs_split = torch.split(imgrecs, num_channel, dim=1)
             for imgrec in imgrecs_split:
