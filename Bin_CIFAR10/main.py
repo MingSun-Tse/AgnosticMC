@@ -176,8 +176,7 @@ if __name__ == "__main__":
       imgrec_all = []; logits_all = []; imgrec_DT_all = []; hardloss_dec_all = []; trainacc_dec_all = []
       actimax_loss_print = []
       
-      if args.input == "pseudo_image":
-        # Generate codes randomly
+      if args.input == "pseudo_image": # use artificially created data as input 
         if args.lw_msgan or args.lw_msgan_feat:
           half_bs = int(args.batch_size / 2)
           random_z1 = torch.randn(half_bs, args.num_z).cuda()
@@ -319,7 +318,7 @@ if __name__ == "__main__":
               ave_grad = ["{:<30} {:.6f}  /  {:.6f}  ({:.10f})\n".format(x[0], x[1], x[2], x[1]/x[2]) for x in ave_grad]
               ave_grad = "".join(ave_grad)
               logprint(("E{:0>%s}S{:0>%s} (grad x lr) / weight:\n{}" % (num_digit_show_epoch, num_digit_show_step)).format(epoch, step, ave_grad))
-      else:
+      else: # use noise or alternative data as input
         if args.input == "random_noise":
           imgrecs = torch.randn_like(img).cuda()
         elif args.input == "alternative_data":

@@ -1209,7 +1209,7 @@ class AutoEncoder_GAN4(nn.Module):
       # BE = VGG19; Dec = Generator; SE = WideResNet_SE # converge! 
       # BE = WideResNet; Dec = Generator; SE = SmallVGG19 # TODO-@mingsuntse-20190528: this cannot converge. Still don't know why.
     elif args.dataset == "MNIST":
-      Dec = Generator_MNIST # eval("DLeNet5_deconv" + "_Random" * args.random_dec) # Generator_MNIST works best.
+      Dec = eval("DLeNet5_deconv" + "_Random" * args.random_dec) # Generator_MNIST works best.
       BE  = eval("LeNet5" + args.which_lenet)
       SE  = eval("SmallLeNet5" + int(args.deep_lenet5[1]) * "_deep")
     
