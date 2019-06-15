@@ -562,7 +562,6 @@ class View(nn.Module):
       self.size = size
   def forward(self, tensor):
       return tensor.view(self.size)
-        
 class Generator(nn.Module):
   def __init__(self, input_dim, model=None, fixed=False, gray=False, num_divbranch=1, dropout=0):
     super(Generator, self).__init__()
@@ -584,15 +583,12 @@ class Generator(nn.Module):
       nn.Conv2d(64, 3, 3, stride=1, padding=1),
       nn.BatchNorm2d(3, affine=False), # This is optional
   )
-  # rewrite the layers for forward_branch
-  
-  
+
   def forward(self, z):
     return self.layers(z)
   
   def forward_branch(self, z):
     pass
-    
 
 class Generator_Random(nn.Module):
   def __init__(self, input_dim, model=None, fixed=False, gray=False, num_divbranch=1, dropout=0):
@@ -643,8 +639,8 @@ class DLeNet5_deconv(nn.Module):
         nn.LeakyReLU(0.2, inplace=True),
         
         nn.Conv2d(64, num_channel, 3, stride=1, padding=1),
-        nn.BatchNorm2d(num_channel, 0.8), # Ref: Huawei's paper. They add a BN layer at the end of the generator.
-        nn.Tanh(),
+        nn.BatchNorm2d(num_channel, 0.8), # Ref: DFL. They add a BN layer at the end of the generator.
+        nn.Tanh() # I added this, because without this normalization, the norm will explode (still the reason is unknown)
     )
     
     # Rewrite conv_blocks above, for forward_branch
@@ -688,6 +684,32 @@ class DLeNet5_deconv(nn.Module):
     out3 = self.conv3(out2)
     return out1, out2, out3
 
+# Imitate the generator above for CIFAR10
+class Generator_MNIST(nn.Module):
+  def __init__(self, input_dim, model=None, fixed=False, gray=False, num_divbranch=1, dropout=0):
+    super(Generator_MNIST, self).__init__()
+    self.layers = nn.Sequential(
+      nn.Linear(input_dim, 128 * 10**2),
+      View((-1, 128, 10, 10)),
+      nn.BatchNorm2d(128),
+
+      nn.Upsample(scale_factor=1.6),
+      nn.Conv2d(128, 128, 3, stride=1, padding=1),
+      nn.BatchNorm2d(128),
+      nn.LeakyReLU(0.2, inplace=True),
+
+      nn.Upsample(scale_factor=2),
+      nn.Conv2d(128, 64, 3, stride=1, padding=1),
+      nn.BatchNorm2d(64),
+      nn.LeakyReLU(0.2, inplace=True),
+
+      nn.Conv2d(64, 1, 3, stride=1, padding=1),
+      nn.BatchNorm2d(1, affine=False)
+  )
+
+  def forward(self, z):
+    return self.layers(z)
+    
 class DLeNet5_deconv_Random(nn.Module):
   def __init__(self, input_dim, model=None, fixed=False, gray=False, num_divbranch=1, dropout=0):
     super(DLeNet5_deconv_Random, self).__init__()
@@ -1185,9 +1207,9 @@ class AutoEncoder_GAN4(nn.Module):
     if "CIFAR" in args.dataset:
       BE = WideResNet_16_2; Dec = eval("Generator" + "_Random" * args.random_dec); SE = WideResNet_16_1 # converge!
       # BE = VGG19; Dec = Generator; SE = WideResNet_SE # converge! 
-      # BE = WideResNet; Dec = Generator; SE = SmallVGG19 # TODO-@mingsuntse-20190528: this cannot converge, still don't know why.
+      # BE = WideResNet; Dec = Generator; SE = SmallVGG19 # TODO-@mingsuntse-20190528: this cannot converge. Still don't know why.
     elif args.dataset == "MNIST":
-      Dec = eval("DLeNet5_deconv" + "_Random" * args.random_dec)
+      Dec = Generator_MNIST # eval("DLeNet5_deconv" + "_Random" * args.random_dec) # Generator_MNIST works best.
       BE  = eval("LeNet5" + args.which_lenet)
       SE  = eval("SmallLeNet5" + int(args.deep_lenet5[1]) * "_deep")
     

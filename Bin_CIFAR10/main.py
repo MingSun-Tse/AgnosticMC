@@ -375,7 +375,7 @@ if __name__ == "__main__":
             trainacc_se_all.append(trainacc)
             
             # print accuracy of each class
-            if step % args.show_interval == 0:
+            if step % args.save_interval == 0:
               right_wrt_label = [0] * args.num_class
               cnt_wrt_label = [0] * args.num_class
               for kk in range(args.batch_size):
