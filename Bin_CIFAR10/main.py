@@ -169,6 +169,7 @@ if __name__ == "__main__":
   num_digit_show_step  = len(str(int(num_train / args.batch_size)))
   num_digit_show_epoch = len(str(args.num_epoch))
   t1 = time.time()
+  last_acc_dec = last_acc_se = 0
   for epoch in range(previous_epoch, args.num_epoch):
     for step, (img, label) in enumerate(train_loader):
       ae.train()
@@ -216,9 +217,10 @@ if __name__ == "__main__":
             # ref: 2019 CVPR Mode Seeking Generative Adversarial Networks for Diverse Image Synthesis
             # https://github.com/HelenMao/MSGAN
             if args.lw_msgan:
+              adjusted_lw_msgan = args.lw_msgan * 100 * pow(max(last_acc_dec, last_acc_se), 3)
               imgrecs_1, imgrecs_2 = torch.split(imgrecs, half_bs, dim=0)
               lz_pixel = torch.mean(torch.abs(imgrecs_1 - imgrecs_2)) / torch.mean(torch.abs(random_z1 - random_z2))
-              total_loss_dec += -args.lw_msgan * lz_pixel
+              total_loss_dec += -adjusted_lw_msgan * lz_pixel
             
             # apply msgan to the feature of decoder
             if args.lw_msgan_decfeat:
@@ -254,8 +256,6 @@ if __name__ == "__main__":
               if args.lw_norm: total_loss_dec += imgnorm * args.lw_norm
               
               ## Classification loss, or hard-target loss in KD
-              # pred = logits.detach().max(1)[1] ## TODO: new idea to impl.
-              # pred.eq(label.view_as(pred))
               hardloss = nn.CrossEntropyLoss()(logits, label)
               hardloss_dec_all.append(hardloss.item())
               if args.lw_hard_dec: total_loss_dec += hardloss * args.lw_hard_dec
@@ -263,6 +263,7 @@ if __name__ == "__main__":
               pred = logits.detach().max(1)[1]
               trainacc = pred.eq(label.view_as(pred)).sum().item() / label.size(0)
               trainacc_dec_all.append(trainacc)
+              last_acc_dec = trainacc
               
               ## Data augmentation loss
               if args.lw_DT:
@@ -280,10 +281,10 @@ if __name__ == "__main__":
               
               ## Activation maximization loss
               # ref: 2016 IJCV Visualizing Deep Convolutional Neural Networks Using Natural Pre-images
-              actimax_loss = torch.zeros(1)
               if args.clip_actimax and epoch >= 7:
                 args.lw_actimax = 0
               if args.lw_actimax:
+                actimax_loss = torch.zeros(1)
                 rand_loss_weight = torch.rand_like(logits) * args.noise_magnitude
                 for i in range(logits.size(0)):
                   rand_loss_weight[i, label[i]] = 1
@@ -301,15 +302,6 @@ if __name__ == "__main__":
               L_ie = torch.dot(ave_prob, torch.log(ave_prob)) / args.num_class
               if args.lw_class_balance: total_loss_dec += L_ie * args.lw_class_balance
               
-              ## My diversity loss
-              # pred_label = logits.argmax(dim=1)
-              # true_prob = torch.zeros_like(prob); true_prob.copy_(prob)
-              # for i in range(logits.size(0)):
-                # true_prob[i, label[i]] = prob[i, pred_label[i]]
-                # true_prob[i, pred_label[i]] = prob[i, label[i]]
-              # loss_KL = nn.KLDivLoss()(F.log_softmax(logits, dim=1), true_prob.detach())
-              # if args.lw_my_diversity: total_loss_dec += loss_KL * args.lw_my_diversity
-            
             dec.zero_grad()
             total_loss_dec.backward()
             optimizer_d.step()
@@ -373,6 +365,7 @@ if __name__ == "__main__":
             pred = logits.detach().max(1)[1]
             trainacc = pred.eq(label.view_as(pred)).sum().item() / label.size(0)
             trainacc_se_all.append(trainacc)
+            last_acc_se = trainacc
             
             # print accuracy of each class
             if step % args.save_interval == 0:
