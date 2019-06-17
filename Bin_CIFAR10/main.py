@@ -216,7 +216,7 @@ if __name__ == "__main__":
             # ref: 2019 CVPR Mode Seeking Generative Adversarial Networks for Diverse Image Synthesis
             # https://github.com/HelenMao/MSGAN
             if args.lw_msgan:
-              adjusted_lw_msgan = args.lw_msgan * 100 * pow(max(last_acc_dec, last_acc_se), 3)
+              adjusted_lw_msgan = args.lw_msgan * 50 * pow(max(last_acc_dec, last_acc_se), 4)
               imgrecs_1, imgrecs_2 = torch.split(imgrecs, half_bs, dim=0)
               lz_pixel = torch.mean(torch.abs(imgrecs_1 - imgrecs_2)) / torch.mean(torch.abs(random_z1 - random_z2))
               total_loss_dec += -adjusted_lw_msgan * lz_pixel
