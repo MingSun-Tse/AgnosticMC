@@ -29,6 +29,7 @@ from torch.autograd import Variable
 from model import AutoEncoders, EMA, preprocess_image, recreate_image
 from data import set_up_data
 from util import check_path, get_previous_step, LogPrint, set_up_dir, feat_visualize
+from func import Entropy
 
 
 # Passed-in params
@@ -55,11 +56,12 @@ parser.add_argument('--lw_hard_se', type=float, default=1)
 parser.add_argument('--lw_tv',   type=float, default=0) #1e-6)
 parser.add_argument('--lw_norm', type=float, default=0) #1e-4)
 parser.add_argument('--lw_DT',   type=float, default=0, help="DT means 'defined transformation', ie, the common data augmentation operations like random translation, rotation, etc.") # 10)
-parser.add_argument('--lw_adv',  type=float, default=0)
-parser.add_argument('--lw_actimax',  type=float, default=0)
-parser.add_argument('--lw_msgan',  type=float, default=1e-30) # 100)
-parser.add_argument('--lw_msgan_feat',  type=float, default=0) # 100)
-parser.add_argument('--lw_msgan_decfeat',  type=float, default=0) # 100)
+parser.add_argument('--lw_adv', type=float, default=0)
+parser.add_argument('--lw_actimax', type=float, default=0)
+parser.add_argument('--lw_msgan', type=float, default=10)
+parser.add_argument('--lw_msgan_feat', type=float, default=0)
+parser.add_argument('--lw_msgan_decfeat', type=float, default=0)
+parser.add_argument('--lw_entropy', type=float, default=0)
 parser.add_argument('--lw_feat_L1_norm', type=float, default=0, help="ref to DFL paper")
 parser.add_argument('--lw_class_balance', type=float, default=1000, help="ref to DFL paper")
 # ----------------------------------------------------------------
@@ -212,16 +214,14 @@ if __name__ == "__main__":
             else:
               imgrecs = dec(x)
             
-            ## Diversity encouraging loss: MSGAN
-            # ref: 2019 CVPR Mode Seeking Generative Adversarial Networks for Diverse Image Synthesis
+            ## Diversity encouraging loss: MSGAN (2019 CVPR Mode Seeking Generative Adversarial Networks for Diverse Image Synthesis)
             # https://github.com/HelenMao/MSGAN
             if args.lw_msgan:
               adjusted_lw_msgan = args.lw_msgan * 100 * pow(max(last_acc_dec, last_acc_se), 3)
               imgrecs_1, imgrecs_2 = torch.split(imgrecs, half_bs, dim=0)
               lz_pixel = torch.mean(torch.abs(imgrecs_1 - imgrecs_2)) / torch.mean(torch.abs(random_z1 - random_z2))
               total_loss_dec += -adjusted_lw_msgan * lz_pixel
-            
-            # apply msgan to the feature of decoder
+            # apply msgan to the feature of decoder (Deprecated)
             if args.lw_msgan_decfeat:
               for feat in dec_feats:
                 f1, f2 = torch.split(feat, half_bs, dim=0)
@@ -264,6 +264,11 @@ if __name__ == "__main__":
               trainacc_dec_all.append(trainacc)
               last_acc_dec = trainacc
               
+              ## Entropy Maximization Loss
+              entropyloss = Entropy()(logits)
+              if args.lw_entropy:
+                total_loss_dec += -args.lw_entropy * entropyloss
+              
               ## Data augmentation loss
               if args.lw_DT:
                 imgrec_DT = ae.defined_trans(imgrec) # DT: defined transform
@@ -295,7 +300,6 @@ if __name__ == "__main__":
               # ref: 2019.04 arxiv Data-Free Learning of Student Networks (https://arxiv.org/abs/1904.01186)
               L_alpha = -torch.norm(last_feature, p=1) / last_feature.size(0)
               if args.lw_feat_L1_norm: total_loss_dec += L_alpha * args.lw_feat_L1_norm
-              
               prob = logits.softmax(dim=1)
               ave_prob = prob.mean(dim=0)
               L_ie = torch.dot(ave_prob, torch.log(ave_prob)) / args.num_class
@@ -318,6 +322,7 @@ if __name__ == "__main__":
               ave_grad = ["{:<30} {:.6f}  /  {:.6f}  ({:.10f})\n".format(x[0], x[1], x[2], x[1]/x[2]) for x in ave_grad]
               ave_grad = "".join(ave_grad)
               logprint(("E{:0>%s}S{:0>%s} (grad x lr) / weight:\n{}" % (num_digit_show_epoch, num_digit_show_step)).format(epoch, step, ave_grad))
+      
       else: # use noise or alternative data as input
         if args.input == "random_noise":
           imgrecs = torch.randn_like(img).cuda()
