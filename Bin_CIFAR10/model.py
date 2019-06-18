@@ -1004,6 +1004,50 @@ class SmallLeNet5(nn.Module):
     y = self.relu(self.fc4(y)); out4 = y
     y = self.fc5(y)
     return out1, out2, out3, out4, y
+
+class SmallLeNet5_2neurons(nn.Module):
+  def __init__(self, model=None, fixed=False):
+    super(SmallLeNet5_2neurons, self).__init__()
+    self.fixed = fixed
+    
+    self.conv1 = nn.Conv2d( 1,  3, kernel_size=(5, 5), stride=(1, 1), padding=(0, 0))
+    self.pool1 = nn.MaxPool2d(kernel_size=2, stride=2, padding=0)
+    self.conv2 = nn.Conv2d( 3,  8, kernel_size=(5, 5), stride=(1, 1), padding=(0, 0))
+    self.pool2 = nn.MaxPool2d(kernel_size=2, stride=2, padding=0)
+    self.fc3 = nn.Linear(200, 120)
+    self.fc4 = nn.Linear(120,  84)
+    self.fc5 = nn.Linear( 84,   2)
+    self.fc6 = nn.Linear(  2,  10)
+    self.relu = nn.ReLU(inplace=True)
+    
+    if model:
+      self.load_state_dict(torch.load(model))
+    if fixed:
+      for param in self.parameters():
+          param.requires_grad = False
+      
+  def forward(self, y):
+    y = self.relu(self.conv1(y))
+    y = self.pool1(y)
+    y = self.relu(self.conv2(y))
+    y = self.pool2(y)
+    y = y.view(y.size(0), -1)
+    y = self.relu(self.fc3(y))
+    y = self.relu(self.fc4(y))
+    y = self.relu(self.fc5(y))
+    y = self.fc6(y)
+    return y
+  
+  def forward_2neurons(self, y):
+    y = self.relu(self.conv1(y))
+    y = self.pool1(y)
+    y = self.relu(self.conv2(y))
+    y = self.pool2(y)
+    y = y.view(y.size(0), -1)
+    y = self.relu(self.fc3(y))
+    y = self.relu(self.fc4(y))
+    y = self.fc5(y)
+    return y
     
 class SmallLeNet5_deep(nn.Module):
   def __init__(self, model=None, fixed=False):
@@ -1206,14 +1250,17 @@ class AutoEncoder_GAN4(nn.Module):
     super(AutoEncoder_GAN4, self).__init__()
     if "CIFAR" in args.dataset:
       BE = WideResNet_16_2; Dec = eval("Generator" + "_Random" * args.random_dec); SE = WideResNet_16_1 # converge!
+      Embed = WideResNet_16_2 # TODO
       # BE = VGG19; Dec = Generator; SE = WideResNet_SE # converge! 
       # BE = WideResNet; Dec = Generator; SE = SmallVGG19 # TODO-@mingsuntse-20190528: this cannot converge. Still don't know why.
     elif args.dataset == "MNIST":
       Dec = eval("DLeNet5_deconv" + "_Random" * args.random_dec) # Generator_MNIST works best.
       BE  = eval("LeNet5" + args.which_lenet)
       SE  = eval("SmallLeNet5" + int(args.deep_lenet5[1]) * "_deep")
-    
+      Embed = LeNet5_2neurons
+      
     self.be = BE(args.e1, fixed=True)
+    self.em = Embed(args.embed_net).eval()
     self.defined_trans = Transform()
     self.upscale = nn.UpsamplingNearest2d(scale_factor=2)
     

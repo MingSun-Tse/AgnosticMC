@@ -48,5 +48,5 @@ def set_up_data(dataset, train_batch_size):
                             
   kwargs = {'num_workers': 4, 'pin_memory': True}
   train_loader = torch.utils.data.DataLoader(data_train, batch_size=train_batch_size, shuffle=True, **kwargs)
-  test_loader = torch.utils.data.DataLoader(data_test, batch_size=100, shuffle=False, **kwargs)
+  test_loader = torch.utils.data.DataLoader(data_test, batch_size=500, shuffle=True, **kwargs)
   return train_loader, len(data_train), test_loader, len(data_test)

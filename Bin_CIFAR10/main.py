@@ -33,8 +33,9 @@ from util import check_path, get_previous_step, LogPrint, set_up_dir, feat_visua
 
 # Passed-in params
 parser = argparse.ArgumentParser(description="Knowledge Transfer")
-parser.add_argument('--e1',  type=str,   default=None)
-parser.add_argument('--e2',  type=str,   default=None)
+parser.add_argument('--e1', type=str, default=None)
+parser.add_argument('--e2', type=str, default=None)
+parser.add_argument('--embed_net', type=str, default=None)
 parser.add_argument('--pretrained_dir',   type=str, default=None, help="the directory of pretrained decoder models")
 parser.add_argument('--pretrained_timeid',type=str, default=None, help="the timeid of the pretrained models.")
 parser.add_argument('--num_dec', type=int, default=1)
@@ -88,14 +89,17 @@ parser.add_argument('--use_condition', action="store_true")
 parser.add_argument('--dec_dropout', type=float, default=0)
 parser.add_argument('--n_dec_update', type=int, default=1)
 parser.add_argument('--n_se_update', type=int, default=1)
+parser.add_argument('--plot_train_feat', action="store_true")
+parser.add_argument('--plot_test_feat', action="store_true")
 args = parser.parse_args()
 
 # Update and check args
-pretrained_be_path = {
-  "MNIST"          : "train_baseline_lenet5/trained_weights2/w*/*E17S0*.pth",
-  "MNIST_deep"     : "train_baseline_lenet5/trained_weights_verydeep/w*/*E16S0*.pth", #"train_baseline_lenet5/trained_weights_deep/w*/*E19S0*.pth",
-  "MNIST_2neurons" : "train_baseline_lenet5/trained_weights_*2neurons/w*/*E21S0*.pth",
-  "CIFAR10"        : "../../ZeroShot*/Pretrained/CIFAR10/WRN-16-2/last.pth.tar", # "models/model_best.pth.tar",
+pretrained_model_path = {
+  "MNIST"            : "train_baseline_lenet5/trained_weights2/w*/*E17S0*.pth",
+  "MNIST_deep"       : "train_baseline_lenet5/trained_weights_verydeep/w*/*E16S0*.pth", #"train_baseline_lenet5/trained_weights_deep/w*/*E19S0*.pth",
+  "MNIST_2neurons"   : "train_baseline_lenet5/trained_weights_*2neurons/w*/*E21S0*.pth",
+  "CIFAR10"          : "../../ZeroShot*/Pretrained/CIFAR10/WRN-16-2/last.pth.tar", # "models/model_best.pth.tar",
+  "CIFAR10_2neurons" : "TODO",
 }
 assert(args.num_se  == 1)
 assert(args.num_dec == 1)
@@ -103,12 +107,14 @@ assert(args.mode in AutoEncoders.keys())
 assert(args.dataset in ["MNIST", "CIFAR10", "CIFAR100"])
 if args.e1 == None:
   if "CIFAR" in args.dataset:
-    args.e1 = pretrained_be_path["CIFAR10"]
+    args.e1 = pretrained_model_path["CIFAR10"]
   elif args.dataset == "MNIST":
-    key = "MNIST" + args.which_lenet
-    args.e1 = pretrained_be_path[key]
+    args.e1 = pretrained_model_path["MNIST" + args.which_lenet]
+if args.embed_net == None:
+  args.embed_net = pretrained_model_path[args.dataset + "_2neurons"]
 args.e1 = check_path(args.e1)
 args.e2 = check_path(args.e2)
+args.embed_net = check_path(args.embed_net)
 args.pretrained_dir = check_path(args.pretrained_dir)
 args.adv_train = int(args.mode[-1])
 num_channel = 1 if args.dataset == "MNIST" else 3
@@ -170,12 +176,13 @@ if __name__ == "__main__":
   num_digit_show_epoch = len(str(args.num_epoch))
   t1 = time.time()
   last_acc_dec = last_acc_se = 0
+  fig_train = plt.figure()
+  ax_train = fig_train.add_subplot(111)
   for epoch in range(previous_epoch, args.num_epoch):
     for step, (img, label) in enumerate(train_loader):
       ae.train()
       imgrec_all = []; logits_all = []; imgrec_DT_all = []; hardloss_dec_all = []; trainacc_dec_all = []
       actimax_loss_print = []
-      
       if args.input == "pseudo_image": # use artificially created data as input 
         if args.lw_msgan or args.lw_msgan_feat:
           half_bs = int(args.batch_size / 2)
@@ -216,7 +223,7 @@ if __name__ == "__main__":
             # ref: 2019 CVPR Mode Seeking Generative Adversarial Networks for Diverse Image Synthesis
             # https://github.com/HelenMao/MSGAN
             if args.lw_msgan:
-              adjusted_lw_msgan = args.lw_msgan * 50 * pow(max(last_acc_dec, last_acc_se), 4)
+              adjusted_lw_msgan = args.lw_msgan * 100 * pow(max(last_acc_dec, last_acc_se), 3)
               imgrecs_1, imgrecs_2 = torch.split(imgrecs, half_bs, dim=0)
               lz_pixel = torch.mean(torch.abs(imgrecs_1 - imgrecs_2)) / torch.mean(torch.abs(random_z1 - random_z2))
               total_loss_dec += -adjusted_lw_msgan * lz_pixel
@@ -260,9 +267,21 @@ if __name__ == "__main__":
               if args.lw_hard_dec: total_loss_dec += hardloss * args.lw_hard_dec
               # for accuracy print
               pred = logits.detach().max(1)[1]
-              trainacc = pred.eq(label.view_as(pred)).sum().item() / label.size(0)
+              if_right = pred.eq(label.view_as(pred))
+              trainacc = if_right.sum().item() / label.size(0)
               trainacc_dec_all.append(trainacc)
               last_acc_dec = trainacc
+              
+              # feature visualization
+              if args.plot_train_feat and step % 10 == 0:
+                feat = ae.em.forward_2neurons(imgrecs)
+                ax_train = feat_visualize(ax_train, feat.data.cpu().numpy(), label.data.cpu().numpy(), if_right.data.cpu().numpy())
+                if step % args.save_interval == 0:
+                  save_train_feat_path = pjoin(rec_img_path, "%s_E%sS%s_feat-visualization-train.jpg" % (ExpID, epoch, step))
+                  ax_train.set_title("Accuracy = %.4f" % trainacc)
+                  fig_train.savefig(save_train_feat_path)
+                  fig_train = plt.figure()
+                  ax_train = fig_train.add_subplot(111)
               
               ## Data augmentation loss
               if args.lw_DT:
@@ -402,11 +421,6 @@ if __name__ == "__main__":
       if step % args.save_interval == 0:
         ae.eval()
         logprint(("E{:0>%s}S{:0>%s} | Saving image samples" % (num_digit_show_epoch, num_digit_show_step)).format(epoch, step))
-        # feature visualization
-        if args.which_lenet == "_2neurons":
-          feat = ae.be.forward_2neurons(imgrecs)
-          save_feat_path = pjoin(rec_img_path, "%s_E%sS%s_feat-visualization.jpg" % (ExpID, epoch, step))
-          feat_visualize(feat.data.cpu().numpy(), label.data.cpu().numpy(), save_feat_path)
         
         if args.use_condition:          
           test_codes = torch.randn([args.num_class, args.num_z])
@@ -448,11 +462,23 @@ if __name__ == "__main__":
       if step % args.test_interval == 0:
         ae.eval()
         test_acc = 0
+        fig_test = plt.figure()
+        ax_test = fig_test.add_subplot(111)
         for i, (img, label) in enumerate(test_loader):
           label = label.cuda()
           pred = ae.se1(img.cuda()).detach().max(1)[1]
-          test_acc += pred.eq(label.view_as(pred)).sum().item()
-        test_acc /= float(num_test)
+          if_right = pred.eq(label.view_as(pred))
+          test_acc += if_right.sum().item()
+          if i == len(test_loader) - 1:
+            test_acc /= float(num_test)
+          
+          if args.plot_test_feat:
+            feat_test = ae.em.forward_2neurons(img.cuda())
+            ax_test = feat_visualize(ax_test, feat_test.data.cpu().numpy(), label.data.cpu().numpy(), if_right.data.cpu().numpy())
+        save_test_feat_path = pjoin(rec_img_path, "%s_E%sS%s_feat-visualization-test.jpg" % (ExpID, epoch, step))
+        ax_test.set_title("Accuracy = %.4f" % test_acc)
+        fig_test.savefig(save_test_feat_path)
+        
         format_str = "E{:0>%s}S{:0>%s} | " % (num_digit_show_epoch, num_digit_show_step) + "=" * (int(TimeID[-1]) + 1) + "> Test accuracy on SE: {:.4f} (ExpID: {})"
         logprint(format_str.format(epoch, step, test_acc, ExpID))
         # torch.save(ae.se1.state_dict(), pjoin(weights_path, "%s_se_E%sS%s_testacc=%.4f.pth" % (ExpID, epoch, step, test_acc)))

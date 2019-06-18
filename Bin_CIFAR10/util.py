@@ -21,18 +21,21 @@ def check_path(x):
     x = complete_path[0]
   return x
 
-colors  = ["red", "blue", "black", "yellow", "green", "yellowgreen", "gold", "royalblue", "peru", "purple"]
-markers = []
-def feat_visualize(feat, label, save_path):
+colors = ["gray", "blue", "black", "yellow", "green", "yellowgreen", "gold", "royalblue", "peru", "purple"]
+markers = [".", "x"]
+def feat_visualize(ax, feat, label, if_right):
   '''
     feat:  N x 2 # 2-d feature, N: number of examples
     label: N x 1
   '''
-  for x, y in zip(feat, label):
-    plt.scatter(x[0], x[1], color=colors[y])
-  plt.savefig(save_path)
-  plt.close()
-  
+  for x, y, r in zip(feat, label, if_right):
+    if r == 1:
+      ax.scatter(x[0], x[1], color=colors[y], marker=markers[r])
+  for x, y, r in zip(feat, label, if_right):
+    if r == 0:
+      ax.scatter(x[0], x[1], color="red", marker=markers[r])
+  return ax
+
 def get_previous_step(e2, resume):
   previous_epoch = previous_step = 0
   if e2 and resume:
