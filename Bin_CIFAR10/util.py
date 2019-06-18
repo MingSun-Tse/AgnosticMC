@@ -7,6 +7,7 @@ pjoin = os.path.join
 from PIL import Image
 import matplotlib; matplotlib.use("Agg")
 import matplotlib.pyplot as plt
+import numpy as np
 
 class LogPrint():
   def __init__(self, file):
@@ -28,12 +29,14 @@ def feat_visualize(ax, feat, label, if_right):
     feat:  N x 2 # 2-d feature, N: number of examples
     label: N x 1
   '''
-  for x, y, r in zip(feat, label, if_right):
-    if r == 1:
-      ax.scatter(x[0], x[1], color=colors[y], marker=markers[r])
-  for x, y, r in zip(feat, label, if_right):
-    if r == 0:
-      ax.scatter(x[0], x[1], color="red", marker=markers[r])
+  index_1 = np.where(if_right == 1)[0]
+  index_0 = np.where(if_right == 0)[0]
+  for ix in index_1:   
+    x = feat[ix]; y = label[ix]
+    ax.scatter(x[0], x[1], color=colors[y], marker="x")
+  for ix in index_0:   
+    x = feat[ix]; y = label[ix]
+    ax.scatter(x[0], x[1], color="red", marker=".")
   return ax
 
 def get_previous_step(e2, resume):

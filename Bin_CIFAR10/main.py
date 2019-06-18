@@ -273,14 +273,13 @@ if __name__ == "__main__":
               last_acc_dec = trainacc
               
               # feature visualization
-              if args.plot_train_feat and step % 5 == 0:
+              if args.plot_train_feat and step % 20 == 0:
                 feat = ae.em.forward_2neurons(imgrecs)
                 ax_train = feat_visualize(ax_train, feat.data.cpu().numpy(), label.data.cpu().numpy(), if_right.data.cpu().numpy())
                 if step % args.save_interval == 0:
                   save_train_feat_path = pjoin(rec_img_path, "%s_E%sS%s_feat-visualization-train.jpg" % (ExpID, epoch, step))
                   ax_train.set_title("Accuracy = %.4f" % trainacc)
                   fig_train.savefig(save_train_feat_path)
-                  fig_train.clear()
                   fig_train = plt.figure()
                   ax_train = fig_train.add_subplot(111)
               
@@ -479,7 +478,6 @@ if __name__ == "__main__":
         save_test_feat_path = pjoin(rec_img_path, "%s_E%sS%s_feat-visualization-test.jpg" % (ExpID, epoch, step))
         ax_test.set_title("Accuracy = %.4f" % test_acc)
         fig_test.savefig(save_test_feat_path)
-        fig_test.clear()
         
         format_str = "E{:0>%s}S{:0>%s} | " % (num_digit_show_epoch, num_digit_show_step) + "=" * (int(TimeID[-1]) + 1) + "> Test accuracy on SE: {:.4f} (ExpID: {})"
         logprint(format_str.format(epoch, step, test_acc, ExpID))
