@@ -58,6 +58,7 @@ parser.add_argument('--lw_norm', type=float, default=0) #1e-4)
 parser.add_argument('--lw_DT',   type=float, default=0, help="DT means 'defined transformation', ie, the common data augmentation operations like random translation, rotation, etc.") # 10)
 parser.add_argument('--lw_adv',  type=float, default=0)
 parser.add_argument('--lw_actimax',  type=float, default=0)
+parser.add_argument('--lw_entropy',  type=float, default=0)
 parser.add_argument('--lw_msgan',  type=float, default=1e-30) # 100)
 parser.add_argument('--lw_msgan_feat',  type=float, default=0) # 100)
 parser.add_argument('--lw_msgan_decfeat',  type=float, default=0) # 100)
@@ -91,6 +92,7 @@ parser.add_argument('--n_dec_update', type=int, default=1)
 parser.add_argument('--n_se_update', type=int, default=1)
 parser.add_argument('--plot_train_feat', action="store_true")
 parser.add_argument('--plot_test_feat', action="store_true")
+parser.add_argument('--dpi', type=int, default=400)
 args = parser.parse_args()
 
 # Update and check args
@@ -123,6 +125,15 @@ num_channel = 1 if args.dataset == "MNIST" else 3
 TimeID, ExpID, rec_img_path, weights_path, log = set_up_dir(args.project_name, args.resume, args.CodeID)
 logprint = LogPrint(log)
 args.ExpID = ExpID
+
+# Ref: https://discuss.pytorch.org/t/calculating-the-entropy-loss/14510/2
+class Entropy(nn.Module):
+  def __init__(self):
+      super(Entropy, self).__init__()
+  def forward(self, x):
+      b = F.softmax(x, dim=1) * F.log_softmax(x, dim=1)
+      b = -1.0 * b.sum() / x.size()[0]
+      return b
 
 if __name__ == "__main__":
   # Set up model
@@ -176,8 +187,6 @@ if __name__ == "__main__":
   num_digit_show_epoch = len(str(args.num_epoch))
   t1 = time.time()
   last_acc_dec = last_acc_se = 0
-  fig_train = plt.figure()
-  ax_train = fig_train.add_subplot(111)
   for epoch in range(previous_epoch, args.num_epoch):
     for step, (img, label) in enumerate(train_loader):
       ae.train()
@@ -228,7 +237,7 @@ if __name__ == "__main__":
               lz_pixel = torch.mean(torch.abs(imgrecs_1 - imgrecs_2)) / torch.mean(torch.abs(random_z1 - random_z2))
               total_loss_dec += -adjusted_lw_msgan * lz_pixel
             
-            # apply msgan to the feature of decoder
+            # apply msgan to the feature of decoder (deprecated)
             if args.lw_msgan_decfeat:
               for feat in dec_feats:
                 f1, f2 = torch.split(feat, half_bs, dim=0)
@@ -245,7 +254,7 @@ if __name__ == "__main__":
               if not args.use_condition:
                 label = logits.argmax(dim=1).detach()
               
-              ## use msgan idea on the feature
+              ## use msgan idea on the feature (deprecated)
               if args.lw_msgan_feat:
                 for i in range(len(feats) - 2):
                   fs = feats[i]
@@ -272,16 +281,23 @@ if __name__ == "__main__":
               trainacc_dec_all.append(trainacc)
               last_acc_dec = trainacc
               
+              ## Entropy Maximization Loss
+              entropyloss = Entropy()(logits)
+              if args.lw_entropy:
+                adjusted_lw_entropy = args.lw_entropy * pow(max(last_acc_dec, last_acc_se), 10)
+                total_loss_dec += -adjusted_lw_entropy * entropyloss
+              
               # feature visualization
-              if args.plot_train_feat and step % 20 == 0:
+              if args.plot_train_feat and step % 100 == 0:
+                fig_train = plt.figure()
+                ax_train = fig_train.add_subplot(111)
                 feat = ae.em.forward_2neurons(imgrecs)
                 ax_train = feat_visualize(ax_train, feat.data.cpu().numpy(), label.data.cpu().numpy(), if_right.data.cpu().numpy())
-                if step % args.save_interval == 0:
-                  save_train_feat_path = pjoin(rec_img_path, "%s_E%sS%s_feat-visualization-train.jpg" % (ExpID, epoch, step))
-                  ax_train.set_title("Accuracy = %.4f" % trainacc)
-                  fig_train.savefig(save_train_feat_path)
-                  fig_train = plt.figure()
-                  ax_train = fig_train.add_subplot(111)
+                save_train_feat_path = pjoin(rec_img_path, "%s_E%sS%s_feat-visualization-train.jpg" % (ExpID, epoch, step))
+                ax_train.set_title("Accuracy = %.4f" % trainacc)
+                ax_train.set_xlim([-50, 300])
+                ax_train.set_ylim([-50, 300])
+                fig_train.savefig(save_train_feat_path, dpi=args.dpi)
               
               ## Data augmentation loss
               if args.lw_DT:
@@ -475,9 +491,12 @@ if __name__ == "__main__":
           if args.plot_test_feat:
             feat_test = ae.em.forward_2neurons(img.cuda())
             ax_test = feat_visualize(ax_test, feat_test.data.cpu().numpy(), label.data.cpu().numpy(), if_right.data.cpu().numpy())
-        save_test_feat_path = pjoin(rec_img_path, "%s_E%sS%s_feat-visualization-test.jpg" % (ExpID, epoch, step))
-        ax_test.set_title("Accuracy = %.4f" % test_acc)
-        fig_test.savefig(save_test_feat_path)
+        if args.plot_test_feat:
+          save_test_feat_path = pjoin(rec_img_path, "%s_E%sS%s_feat-visualization-test.jpg" % (ExpID, epoch, step))
+          ax_test.set_title("Accuracy = %.4f" % test_acc)
+          ax_test.set_xlim([-200, 1000])
+          ax_test.set_ylim([-200, 1000])
+          fig_test.savefig(save_test_feat_path, dpi=args.dpi)
         
         format_str = "E{:0>%s}S{:0>%s} | " % (num_digit_show_epoch, num_digit_show_step) + "=" * (int(TimeID[-1]) + 1) + "> Test accuracy on SE: {:.4f} (ExpID: {})"
         logprint(format_str.format(epoch, step, test_acc, ExpID))
