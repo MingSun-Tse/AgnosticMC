@@ -187,6 +187,7 @@ if __name__ == "__main__":
   num_digit_show_epoch = len(str(args.num_epoch))
   t1 = time.time()
   last_acc_dec = last_acc_se = 0
+  fig_train = plt.figure(); ax_train = fig_train.add_subplot(111)
   for epoch in range(previous_epoch, args.num_epoch):
     for step, (img, label) in enumerate(train_loader):
       ae.train()
@@ -288,16 +289,16 @@ if __name__ == "__main__":
                 total_loss_dec += -adjusted_lw_entropy * entropyloss
               
               # feature visualization
-              if args.plot_train_feat and step % 100 == 0:
-                fig_train = plt.figure()
-                ax_train = fig_train.add_subplot(111)
+              if args.plot_train_feat and step % 10 == 0:
                 feat = ae.em.forward_2neurons(imgrecs)
                 ax_train = feat_visualize(ax_train, feat.data.cpu().numpy(), label.data.cpu().numpy(), if_right.data.cpu().numpy())
-                save_train_feat_path = pjoin(rec_img_path, "%s_E%sS%s_feat-visualization-train.jpg" % (ExpID, epoch, step))
-                ax_train.set_title("Accuracy = %.4f" % trainacc)
-                ax_train.set_xlim([-50, 300])
-                ax_train.set_ylim([-50, 300])
-                fig_train.savefig(save_train_feat_path, dpi=args.dpi)
+                if step % 100 == 0:
+                  save_train_feat_path = pjoin(rec_img_path, "%s_E%sS%s_feat-visualization-train.jpg" % (ExpID, epoch, step))
+                  ax_train.set_title("Accuracy = %.4f" % trainacc)
+                  ax_train.set_xlim([-50, 300])
+                  ax_train.set_ylim([-50, 300])
+                  fig_train.savefig(save_train_feat_path, dpi=args.dpi)
+                  fig_train = plt.figure(); ax_train = fig_train.add_subplot(111)
               
               ## Data augmentation loss
               if args.lw_DT:
