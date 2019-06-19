@@ -55,6 +55,7 @@ parser.add_argument('--lw_hard_dec', type=float, default=1)
 parser.add_argument('--lw_hard_se', type=float, default=1)
 parser.add_argument('--lw_tv',   type=float, default=0) #1e-6)
 parser.add_argument('--lw_norm', type=float, default=0) #1e-4)
+parser.add_argument('--lw_feat_norm', type=float, default=0) #1e-4)
 parser.add_argument('--lw_DT',   type=float, default=0, help="DT means 'defined transformation', ie, the common data augmentation operations like random translation, rotation, etc.") # 10)
 parser.add_argument('--lw_adv',  type=float, default=0)
 parser.add_argument('--lw_actimax',  type=float, default=0)
@@ -283,18 +284,24 @@ if __name__ == "__main__":
               last_acc_dec = trainacc
               
               ## Entropy Maximization Loss
-              entropyloss = Entropy()(logits)
               if args.lw_entropy:
                 adjusted_lw_entropy = args.lw_entropy * pow(max(last_acc_dec, last_acc_se), 10)
+                entropyloss = Entropy()(logits)
                 total_loss_dec += -adjusted_lw_entropy * entropyloss
+
+              ## Feature Contraction Loss
+              if args.lw_feat_norm:
+                adjusted_lw_feat_norm = args.lw_feat_norm * pow(max(last_acc_dec, last_acc_se), 5)
+                feat_norm = torch.pow(torch.norm(last_feature, p=6), 6)
+                total_loss_dec += feat_norm * args.lw_feat_norm
               
-              # feature visualization
+              ## feature visualization
               if args.plot_train_feat and step % 10 == 0:
                 feat = ae.em.forward_2neurons(imgrecs)
                 ax_train = feat_visualize(ax_train, feat.data.cpu().numpy(), label.data.cpu().numpy(), if_right.data.cpu().numpy())
                 if step % 100 == 0:
                   save_train_feat_path = pjoin(rec_img_path, "%s_E%sS%s_feat-visualization-train.jpg" % (ExpID, epoch, step))
-                  ax_train.set_title("Accuracy = %.4f" % trainacc)
+                  ax_train.set_title("Train Accuracy = %.4f" % trainacc)
                   ax_train.set_xlim([-50, 300])
                   ax_train.set_ylim([-50, 300])
                   fig_train.savefig(save_train_feat_path, dpi=args.dpi)
@@ -354,6 +361,7 @@ if __name__ == "__main__":
               ave_grad = ["{:<30} {:.6f}  /  {:.6f}  ({:.10f})\n".format(x[0], x[1], x[2], x[1]/x[2]) for x in ave_grad]
               ave_grad = "".join(ave_grad)
               logprint(("E{:0>%s}S{:0>%s} (grad x lr) / weight:\n{}" % (num_digit_show_epoch, num_digit_show_step)).format(epoch, step, ave_grad))
+      
       else: # use noise or alternative data as input
         if args.input == "random_noise":
           imgrecs = torch.randn_like(img).cuda()
@@ -494,7 +502,7 @@ if __name__ == "__main__":
             ax_test = feat_visualize(ax_test, feat_test.data.cpu().numpy(), label.data.cpu().numpy(), if_right.data.cpu().numpy())
         if args.plot_test_feat:
           save_test_feat_path = pjoin(rec_img_path, "%s_E%sS%s_feat-visualization-test.jpg" % (ExpID, epoch, step))
-          ax_test.set_title("Accuracy = %.4f" % test_acc)
+          ax_test.set_title("Test Accuracy = %.4f" % test_acc)
           ax_test.set_xlim([-200, 1000])
           ax_test.set_ylim([-200, 1000])
           fig_test.savefig(save_test_feat_path, dpi=args.dpi)
