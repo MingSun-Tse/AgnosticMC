@@ -1,0 +1,1 @@
+!nohup python main.py  --lw_soft 100  --lw_hard_se 0  --num_epoch 400 --gpu 7 --lw_class_balance 0  --lw_msgan 10 --lw_entropy 0  --lw_msgan_feat 0 --use_condition --plot_train_feat --plot_test_feat --CodeID 0c823c54 > /dev/null &
