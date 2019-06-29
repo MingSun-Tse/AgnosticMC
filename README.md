@@ -3,7 +3,7 @@
 ## Environment:
 - Python 3.5.3
 - PyTorch 0.4.1
-
+  
 ## Dataset
 CIFAR10 and MNIST datasets are required here. When you first run the script below, 
 if you haven't downloaded the data before, it will automatically download them at folder `data_CIFAR10` and `data_MNIST`. 
@@ -23,7 +23,7 @@ python main.py  --lw_soft 100  --lw_hard_dec 0  --lw_hard_se 0  --use_random_inp
 nohup python main.py  --lw_soft 100  --lw_hard_dec 0  --lw_hard_se 0  --use_random_input  --gpu <id> --CodeID <code git log id>  > /dev/null &
 
 # newest script:
-nohup python main.py  --lw_soft 100  --lw_hard_se 0  --num_epoch 400 --gpu <id>  --lw_class_balance 0  --lw_msgan 10 --lw_msgan_feat 0 --use_condition --CodeID <code git log id> > /dev/null &
+nohup python main.py  --lw_soft 100  --lw_hard_se 0  --num_epoch 400 --gpu <id>  --lw_class_balance 0  --lw_msgan 10 --lw_msgan_feat 0 --use_condition --plot_train_feat --plot_test_feat --CodeID <code git log id> > /dev/null &
 ```
 
 The log will be saved in folder `../Experiment/xxx`, where `xxx` is a folder named by the time stamp when you run 

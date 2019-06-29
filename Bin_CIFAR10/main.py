@@ -60,6 +60,7 @@ parser.add_argument('--lw_DT',   type=float, default=0, help="DT means 'defined 
 parser.add_argument('--lw_adv',  type=float, default=0)
 parser.add_argument('--lw_actimax',  type=float, default=0)
 parser.add_argument('--lw_entropy',  type=float, default=0)
+parser.add_argument('--lw_contract', type=float, default=0)
 parser.add_argument('--lw_msgan',  type=float, default=1e-30) # 100)
 parser.add_argument('--lw_msgan_feat',  type=float, default=0) # 100)
 parser.add_argument('--lw_msgan_decfeat',  type=float, default=0) # 100)
@@ -136,6 +137,16 @@ class Entropy(nn.Module):
       b = -1.0 * b.sum() / x.size()[0]
       return b
 
+def get_feature_center(feat, label):
+  num_class = 10
+  feat_sum = [0] * num_class
+  cnt = [0] * num_class
+  for f, y in zip(feat, label):
+    feat_sum[y] += f
+    cnt[y] += 1
+  center = [feat_sum[i]/cnt[i] for i in range(num_class)]
+  return center
+  
 if __name__ == "__main__":
   # Set up model
   AE = AutoEncoders[args.mode]
@@ -295,6 +306,14 @@ if __name__ == "__main__":
                 feat_norm = torch.pow(torch.norm(last_feature, p=6), 6)
                 total_loss_dec += feat_norm * args.lw_feat_norm
               
+              ## Center Contraction loss
+              center = get_feature_center(last_feature, label)
+              distance_from_origin = 0
+              for c in center:
+                distance_from_origin += torch.pow(torch.norm(c, p=2), 2)
+              if args.lw_contract: total_loss_dec += distance_from_origin * args.lw_contract
+              if step % 10 == 0: logprint("distance_from_origin: %.4f" % distance_from_origin.item())
+              
               ## feature visualization
               if args.plot_train_feat and step % 10 == 0:
                 feat = ae.em.forward_2neurons(imgrecs)
@@ -338,7 +357,6 @@ if __name__ == "__main__":
               # ref: 2019.04 arxiv Data-Free Learning of Student Networks (https://arxiv.org/abs/1904.01186)
               L_alpha = -torch.norm(last_feature, p=1) / last_feature.size(0)
               if args.lw_feat_L1_norm: total_loss_dec += L_alpha * args.lw_feat_L1_norm
-              
               prob = logits.softmax(dim=1)
               ave_prob = prob.mean(dim=0)
               L_ie = torch.dot(ave_prob, torch.log(ave_prob)) / args.num_class
@@ -535,3 +553,8 @@ if __name__ == "__main__":
             (time.time() - t1) / args.show_interval))
 
         t1 = time.time()
+
+  
+  
+  
+  
