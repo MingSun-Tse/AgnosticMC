@@ -54,9 +54,10 @@ def get_previous_step(e2, resume):
 def set_up_dir(project_name, resume, CodeID):
   TimeID = time.strftime("%Y%m%d-%H%M%S")
   ExpID = "SERVER" + os.environ["SERVER"] + "-" + TimeID
-  project_path = pjoin("../Experiments", ExpID + "_" + project_name)
+  folder_name = ExpID + "_" + project_name if project_name else ExpID
+  project_path = pjoin("../Experiments", folder_name)
   rec_img_path = pjoin(project_path, "reconstructed_images")
-  weights_path = pjoin(project_path, "weights") # to save torch model
+  weights_path = pjoin(project_path, "weights")
   if not os.path.exists(project_path):
     os.makedirs(project_path)
   else:
