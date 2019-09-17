@@ -29,6 +29,7 @@ from torch.autograd import Variable
 from model import AutoEncoders, EMA, preprocess_image, recreate_image
 from data import set_up_data
 from util import check_path, get_previous_step, LogPrint, set_up_dir, feat_visualize
+from func import Entropy
 
 
 # Passed-in params
@@ -57,6 +58,7 @@ parser.add_argument('--lw_tv',   type=float, default=0) #1e-6)
 parser.add_argument('--lw_norm', type=float, default=0) #1e-4)
 parser.add_argument('--lw_feat_norm', type=float, default=0) #1e-4)
 parser.add_argument('--lw_DT',   type=float, default=0, help="DT means 'defined transformation', ie, the common data augmentation operations like random translation, rotation, etc.") # 10)
+<<<<<<< HEAD
 parser.add_argument('--lw_adv',  type=float, default=0)
 parser.add_argument('--lw_actimax',  type=float, default=0)
 parser.add_argument('--lw_entropy',  type=float, default=0)
@@ -64,6 +66,14 @@ parser.add_argument('--lw_contract', type=float, default=0)
 parser.add_argument('--lw_msgan',  type=float, default=1e-30) # 100)
 parser.add_argument('--lw_msgan_feat',  type=float, default=0) # 100)
 parser.add_argument('--lw_msgan_decfeat',  type=float, default=0) # 100)
+=======
+parser.add_argument('--lw_adv', type=float, default=0)
+parser.add_argument('--lw_actimax', type=float, default=0)
+parser.add_argument('--lw_msgan', type=float, default=10)
+parser.add_argument('--lw_msgan_feat', type=float, default=0)
+parser.add_argument('--lw_msgan_decfeat', type=float, default=0)
+parser.add_argument('--lw_entropy', type=float, default=0)
+>>>>>>> 347dcbb4638b0ccd4041e495e60e71992570b437
 parser.add_argument('--lw_feat_L1_norm', type=float, default=0, help="ref to DFL paper")
 parser.add_argument('--lw_class_balance', type=float, default=1000, help="ref to DFL paper")
 # ----------------------------------------------------------------
@@ -241,16 +251,19 @@ if __name__ == "__main__":
             else:
               imgrecs = dec(x)
             
-            ## Diversity encouraging loss: MSGAN
-            # ref: 2019 CVPR Mode Seeking Generative Adversarial Networks for Diverse Image Synthesis
+            ## Diversity encouraging loss: MSGAN (2019 CVPR Mode Seeking Generative Adversarial Networks for Diverse Image Synthesis)
             # https://github.com/HelenMao/MSGAN
             if args.lw_msgan:
-              adjusted_lw_msgan = args.lw_msgan * 100 * pow(max(last_acc_dec, last_acc_se), 3)
+              adjusted_lw_msgan = args.lw_msgan # * 100 * pow(max(last_acc_dec, last_acc_se), 3)
               imgrecs_1, imgrecs_2 = torch.split(imgrecs, half_bs, dim=0)
               lz_pixel = torch.mean(torch.abs(imgrecs_1 - imgrecs_2)) / torch.mean(torch.abs(random_z1 - random_z2))
               total_loss_dec += -adjusted_lw_msgan * lz_pixel
+<<<<<<< HEAD
             
             # apply msgan to the feature of decoder (deprecated)
+=======
+            # apply msgan to the feature of decoder (Deprecated)
+>>>>>>> 347dcbb4638b0ccd4041e495e60e71992570b437
             if args.lw_msgan_decfeat:
               for feat in dec_feats:
                 f1, f2 = torch.split(feat, half_bs, dim=0)
@@ -295,6 +308,7 @@ if __name__ == "__main__":
               last_acc_dec = trainacc
               
               ## Entropy Maximization Loss
+<<<<<<< HEAD
               if args.lw_entropy:
                 adjusted_lw_entropy = args.lw_entropy * pow(max(last_acc_dec, last_acc_se), 10)
                 entropyloss = Entropy()(logits)
@@ -325,6 +339,11 @@ if __name__ == "__main__":
                   ax_train.set_ylim([-50, 300])
                   fig_train.savefig(save_train_feat_path, dpi=args.dpi)
                   fig_train = plt.figure(); ax_train = fig_train.add_subplot(111)
+=======
+              entropyloss = Entropy()(logits)
+              if args.lw_entropy:
+                total_loss_dec += -args.lw_entropy * entropyloss
+>>>>>>> 347dcbb4638b0ccd4041e495e60e71992570b437
               
               ## Data augmentation loss
               if args.lw_DT:
