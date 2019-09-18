@@ -59,20 +59,16 @@ def set_up_dir(project_name, resume, CodeID):
     project_path = pjoin("../Experiments", ExpID + "_" + project_name)
     rec_img_path = pjoin(project_path, "reconstructed_images")
     weights_path = pjoin(project_path, "weights")
-    if not os.path.exists(project_path):
-      os.makedirs(project_path)
-    else:
-      if not resume:
-        shutil.rmtree(project_path)
-        os.makedirs(project_path)
-    if not os.path.exists(rec_img_path):
-      os.makedirs(rec_img_path)
-    if not os.path.exists(weights_path):
-      os.makedirs(weights_path)
+    os.makedirs(project_path)
+    os.makedirs(rec_img_path)
+    os.makedirs(weights_path)
     log_path = pjoin(weights_path, "log_" + ExpID + ".txt")
     log = open(log_path, "w+")
   else:
-   rec_img_path = "/dev/null" # for an informal exp, there is no need to save anything
-   weights_path = "/dev/null"
+   rec_img_path = pjoin(os.environ["HOME"], "Trash")
+   weights_path = pjoin(os.environ["HOME"], "Trash")
+   if not os.path.exists(rec_img_path):
+     os.makedirs(rec_img_path)
    log = sys.stdout # print to the screen
+  print(" ".join(["CUDA_VISIBLE_DEVICES='0' python", *sys.argv]), file=log, flush=True) # save the script
   return TimeID, ExpID, rec_img_path, weights_path, log
