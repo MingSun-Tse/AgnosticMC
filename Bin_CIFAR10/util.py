@@ -54,20 +54,25 @@ def get_previous_step(e2, resume):
 def set_up_dir(project_name, resume, CodeID):
   TimeID = time.strftime("%Y%m%d-%H%M%S")
   ExpID = "SERVER" + os.environ["SERVER"] + "-" + TimeID
-  folder_name = ExpID + "_" + project_name if project_name else ExpID
-  project_path = pjoin("../Experiments", folder_name)
-  rec_img_path = pjoin(project_path, "reconstructed_images")
-  weights_path = pjoin(project_path, "weights")
-  if not os.path.exists(project_path):
-    os.makedirs(project_path)
-  else:
-    if not resume:
-      shutil.rmtree(project_path)
+  if CodeID: # Given CodeID, it means this is a formal experiment, i.e., not debugging
+    assert(project_name != "") # For a formal exp, name it!
+    project_path = pjoin("../Experiments", ExpID + "_" + project_name)
+    rec_img_path = pjoin(project_path, "reconstructed_images")
+    weights_path = pjoin(project_path, "weights")
+    if not os.path.exists(project_path):
       os.makedirs(project_path)
-  if not os.path.exists(rec_img_path):
-    os.makedirs(rec_img_path)
-  if not os.path.exists(weights_path):
-    os.makedirs(weights_path)
-  log_path = pjoin(weights_path, "log_" + ExpID + ".txt")
-  log = open(log_path, "w+") if CodeID else sys.stdout # Given CodeID, it means this is a formal experiment, i.e., not debugging
+    else:
+      if not resume:
+        shutil.rmtree(project_path)
+        os.makedirs(project_path)
+    if not os.path.exists(rec_img_path):
+      os.makedirs(rec_img_path)
+    if not os.path.exists(weights_path):
+      os.makedirs(weights_path)
+    log_path = pjoin(weights_path, "log_" + ExpID + ".txt")
+    log = open(log_path, "w+")
+  else:
+   rec_img_path = "/dev/null" # for an informal exp, there is no need to save anything
+   weights_path = "/dev/null"
+   log = sys.stdout # print to the screen
   return TimeID, ExpID, rec_img_path, weights_path, log
