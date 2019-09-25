@@ -56,7 +56,7 @@ def set_up_dir(project_name, resume, CodeID):
   ExpID = "SERVER" + os.environ["SERVER"] + "-" + TimeID
   if CodeID: # Given CodeID, it means this is a formal experiment, i.e., not debugging
     assert(project_name != "") # For a formal exp, name it!
-    project_path = pjoin("../Experiments", ExpID + "_" + project_name)
+    project_path = pjoin("Experiments", ExpID + "_" + project_name)
     rec_img_path = pjoin(project_path, "reconstructed_images")
     weights_path = pjoin(project_path, "weights")
     os.makedirs(project_path)
